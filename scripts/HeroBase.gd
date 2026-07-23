@@ -1067,3 +1067,80 @@ func _tick_sensei_chi_regen(delta: float) -> void:
 		_sensei_chi_accum -= float(whole)
 		current_chi = min(cap, current_chi + whole)
 		_emit_chi_signal()
+
+
+# ============================================================
+# Batch 6 extraction (2026-07-23) — parked drift resolutions.
+# Sound-asymmetry rot fixes: Shino was the template in both cases;
+# the missing per-hero sound was added to Bea BEFORE unifying, so the
+# bodies below are behavior-identical to Shino's original.
+# See REFACTOR_HANDOFF "Batch 6 report" for full rationale.
+# ============================================================
+
+# Coconut overshield-absorb duo ICDs (identical on both heroes; each child's
+# _tick_timers decrements the inherited var, same pattern as _frost_decay_t).
+var _hot_shell_icd: float = 0.0
+var _smokestack_icd: float = 0.0
+
+# Status-zone routing hook. Shino OWNS the real `_spawn_status_zone` (Player.gd);
+# Bea has no such method and routes through a "player"-group member. Each child
+# overrides this; the base no-op just satisfies base-scope method resolution.
+func _spawn_status_zone_routed(_pos: Vector2, _radius: float, _duration: float, _status_id: String, _stacks: int, _col: Color) -> void:
+	pass
+
+
+# Coconut duo overshield-absorb procs (Hot Shell burn retaliation + Smokestack
+# poison cloud). Unified in Batch 6 after adding Shino's `hit_impact` sound to the
+# Hot Shell branch (Bea previously omitted it). The Smokestack zone spawns via the
+# child-overridable _spawn_status_zone_routed hook.
+func _overshield_absorb_duo_procs() -> void:
+	# Hot Shell: burning retaliation at the nearest enemy (1s ICD).
+	# (Spec calls for a homing projectile; prototype resolves instantly at the
+	# nearest enemy within 240px — same payload: small AoE + 2 Burn stacks.)
+	if RunState.is_duo_active("coconut_pepper") and _hot_shell_icd <= 0.0:
+		var best: Node2D = null
+		var best_d: float = 240.0
+		for e in get_tree().get_nodes_in_group("enemy"):
+			if e is Node2D and is_instance_valid(e) and (not e.has_method("is_alive") or e.is_alive()):
+				var d: float = e.global_position.distance_to(global_position)
+				if d < best_d:
+					best = e
+					best_d = d
+		if best != null:
+			_hot_shell_icd = 1.0
+			FX.spawn_burst_particles(best.global_position, Color(1.0, 0.55, 0.15, 0.95), 12)
+			FX.play_sound("hit_impact", 0.7)
+			if best.has_method("take_damage"):
+				best.take_damage(6, (best.global_position - global_position).normalized() * 60.0)
+			if best.has_node("StatusComponent"):
+				best.get_node("StatusComponent").apply("burning", 3.0, 2)
+	# Smokestack: drop a poison cloud at your feet + ministun inside (2s ICD).
+	if RunState.is_duo_active("coconut_onion") and _smokestack_icd <= 0.0:
+		_smokestack_icd = 2.0
+		_spawn_status_zone_routed(global_position, 80.0, 5.0, "poison", 1, Color(0.55, 0.75, 0.45, 0.45))
+		for e in get_tree().get_nodes_in_group("enemy"):
+			if e is Node2D and is_instance_valid(e) \
+			and e.global_position.distance_to(global_position) <= 80.0 \
+			and e.has_node("StatusComponent"):
+				e.get_node("StatusComponent").apply("bash", 0.2, 1)
+
+
+# Quick whip-line visual for Vine Lash / vinewrap procs. Unified in Batch 6 after
+# adding Shino's terminal `ground_pound` sound to Bea's copy (she omitted it).
+func _spawn_vine_visual(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
+	var vine := Line2D.new()
+	vine.width = 4.0
+	vine.default_color = col
+	vine.z_index = 7
+	var mid: Vector2 = (from_pos + to_pos) * 0.5
+	var perp: Vector2 = (to_pos - from_pos).orthogonal().normalized()
+	var bow: Vector2 = mid + perp * (to_pos - from_pos).length() * 0.12
+	for i in range(9):
+		var t: float = float(i) / 8.0
+		var p: Vector2 = from_pos.lerp(bow, t).lerp(bow.lerp(to_pos, t), t)   # quadratic bezier
+		vine.add_point(p)
+	get_tree().current_scene.add_child(vine)
+	var tw: Tween = vine.create_tween()
+	tw.tween_property(vine, "modulate:a", 0.0, 0.28)
+	tw.tween_callback(vine.queue_free)
+	FX.play_sound("ground_pound", 1.0)

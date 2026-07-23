@@ -1985,23 +1985,8 @@ func _maybe_fire_vine_lash() -> void:
 	FX.play_sound("kunai_hit", 0.5)
 
 
-# Quick whip-line visual (mirror of Player.gd._spawn_vine_visual).
-func _spawn_vine_visual(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
-	var vine := Line2D.new()
-	vine.width = 4.0
-	vine.default_color = col
-	vine.z_index = 7
-	var mid: Vector2 = (from_pos + to_pos) * 0.5
-	var perp: Vector2 = (to_pos - from_pos).orthogonal().normalized()
-	var bow: Vector2 = mid + perp * (to_pos - from_pos).length() * 0.12
-	for i in range(9):
-		var t: float = float(i) / 8.0
-		var p: Vector2 = from_pos.lerp(bow, t).lerp(bow.lerp(to_pos, t), t)
-		vine.add_point(p)
-	get_tree().current_scene.add_child(vine)
-	var tw: Tween = vine.create_tween()
-	tw.tween_property(vine, "modulate:a", 0.0, 0.28)
-	tw.tween_callback(vine.queue_free)
+# _spawn_vine_visual moved to HeroBase (Batch 6); the terminal ground_pound sound
+# Shino played (Bea previously omitted) is now part of the unified body.
 
 
 # -------------------------------------------------------
@@ -2308,34 +2293,13 @@ func _bea_corrupt_hit_procs(body: Node, final_dmg: int, is_finisher: bool) -> vo
 # Run 27b — Hot Shell (Coconut+Pepper) + Smokestack (Coconut+Onion) duo procs
 # when Bea's overshield absorbs a hit. Smokestack cloud routes through Shino's
 # zone helper (BeaAI has no zone spawner of its own).
-func _overshield_absorb_duo_procs() -> void:
-	if RunState.is_duo_active("coconut_pepper") and _hot_shell_icd <= 0.0:
-		var best: Node2D = null
-		var best_d: float = 240.0
-		for e in get_tree().get_nodes_in_group("enemy"):
-			if e is Node2D and is_instance_valid(e) and (not e.has_method("is_alive") or e.is_alive()):
-				var d: float = e.global_position.distance_to(global_position)
-				if d < best_d:
-					best = e
-					best_d = d
-		if best != null:
-			_hot_shell_icd = 1.0
-			FX.spawn_burst_particles(best.global_position, Color(1.0, 0.55, 0.15, 0.95), 12)
-			if best.has_method("take_damage"):
-				best.take_damage(6, (best.global_position - global_position).normalized() * 60.0)
-			if best.has_node("StatusComponent"):
-				best.get_node("StatusComponent").apply("burning", 3.0, 2)
-	if RunState.is_duo_active("coconut_onion") and _smokestack_icd <= 0.0:
-		_smokestack_icd = 2.0
-		for _pl in get_tree().get_nodes_in_group("player"):
-			if _pl.has_method("_spawn_status_zone"):
-				_pl._spawn_status_zone(global_position, 80.0, 5.0, "poison", 1, Color(0.55, 0.75, 0.45, 0.45))
-				break
-		for e in get_tree().get_nodes_in_group("enemy"):
-			if e is Node2D and is_instance_valid(e) \
-			and e.global_position.distance_to(global_position) <= 80.0 \
-			and e.has_node("StatusComponent"):
-				e.get_node("StatusComponent").apply("bash", 0.2, 1)
+# _overshield_absorb_duo_procs moved to HeroBase (Batch 6). Bea has no
+# `_spawn_status_zone` of her own, so her routing hook walks the "player" group.
+func _spawn_status_zone_routed(pos: Vector2, radius: float, duration: float, status_id: String, stacks: int, col: Color) -> void:
+	for _pl in get_tree().get_nodes_in_group("player"):
+		if _pl.has_method("_spawn_status_zone"):
+			_pl._spawn_status_zone(pos, radius, duration, status_id, stacks, col)
+			break
 
 
 # _fire_nutshell_shockwave, _refresh_overshield_aura moved to HeroBase (Batch 3).
@@ -4856,8 +4820,7 @@ var _zip_dash_ms_timer: float = 0.0
 var _ingrained_last_pos: Vector2 = Vector2.ZERO
 var _deep_roots_timer: float = 0.0
 var _bunker_timer: float = 0.0
-var _hot_shell_icd: float = 0.0
-var _smokestack_icd: float = 0.0
+# _hot_shell_icd / _smokestack_icd moved to HeroBase (Batch 6).
 # _peel_resto_icd, _candy_apple_bonus moved to HeroBase (Batch 3).
 var _candy_apple_decay: float = 0.0  # decays 1/min while out of combat
 # Run 60 — Tremor Walk (Potato passive) Bea-side: cracked-earth trail on movement.

@@ -191,8 +191,7 @@ var _tremor_walk_last_pos: Vector2 = Vector2.ZERO
 var _scorched_earth_timer: float = 0.0
 var _deep_roots_timer: float = 0.0
 var _bunker_timer: float = 0.0
-var _hot_shell_icd: float = 0.0
-var _smokestack_icd: float = 0.0
+# _hot_shell_icd / _smokestack_icd moved to HeroBase (Batch 6).
 # _peel_resto_icd, _candy_apple_bonus moved to HeroBase (Batch 3).
 var _candy_apple_decay: float = 0.0  # decays 1/min while out of combat
 var _static_charge_count: int = 0    # Run 27e — Static Charge every-3rd-ranged-hit
@@ -394,12 +393,7 @@ const ULT_BASE_DAMAGE: int = 50                   # flat ult damage — proporti
 const ULT_CHI_COST: int = 100
 
 # ---- Bea Thousand Cut Dance (GDD §8.2.3) ----
-const BEA_ULT_BLINK_DAMAGE: int     = 30     # damage per blink hit
-const BEA_ULT_FLOURISH_DAMAGE: int  = 20     # final-flourish bonus pulse
-const BEA_ULT_FLOURISH_RADIUS: float = 100.0 # radius of flourish AoE around last target
-const BEA_ULT_BLINK_OFFSET: float   = 28.0  # px Bea stands in front of enemy on blink
-const BEA_ULT_INTER_HIT_DELAY: float = 0.30 # seconds between blinks
-const BEA_ULT_FINAL_HOLD: float     = 0.45  # landing-pose hold after final flourish
+# BEA_ULT_* consts removed (Batch 6): only the removed dead _run_bea_ult used them.
 
 # ---- Shino Final Ki Blast (GDD §8.2.3) ----
 const SHINO_ULT_WINDUP: float       = 0.50   # ki wind-up before beam extends
@@ -1594,36 +1588,10 @@ func _spawn_rampart_wall(pos: Vector2) -> void:
 
 # Run 27b — Hot Shell (Coconut+Pepper) + Smokestack (Coconut+Onion) duo procs
 # when an overshield absorbs a hit.
-func _overshield_absorb_duo_procs() -> void:
-	# Hot Shell: burning retaliation at the nearest enemy (1s ICD).
-	# (Spec calls for a homing projectile; prototype resolves instantly at the
-	# nearest enemy within 240px — same payload: small AoE + 2 Burn stacks.)
-	if RunState.is_duo_active("coconut_pepper") and _hot_shell_icd <= 0.0:
-		var best: Node2D = null
-		var best_d: float = 240.0
-		for e in get_tree().get_nodes_in_group("enemy"):
-			if e is Node2D and is_instance_valid(e) and (not e.has_method("is_alive") or e.is_alive()):
-				var d: float = e.global_position.distance_to(global_position)
-				if d < best_d:
-					best = e
-					best_d = d
-		if best != null:
-			_hot_shell_icd = 1.0
-			FX.spawn_burst_particles(best.global_position, Color(1.0, 0.55, 0.15, 0.95), 12)
-			FX.play_sound("hit_impact", 0.7)
-			if best.has_method("take_damage"):
-				best.take_damage(6, (best.global_position - global_position).normalized() * 60.0)
-			if best.has_node("StatusComponent"):
-				best.get_node("StatusComponent").apply("burning", 3.0, 2)
-	# Smokestack: drop a poison cloud at your feet + ministun inside (2s ICD).
-	if RunState.is_duo_active("coconut_onion") and _smokestack_icd <= 0.0:
-		_smokestack_icd = 2.0
-		_spawn_status_zone(global_position, 80.0, 5.0, "poison", 1, Color(0.55, 0.75, 0.45, 0.45))
-		for e in get_tree().get_nodes_in_group("enemy"):
-			if e is Node2D and is_instance_valid(e) \
-			and e.global_position.distance_to(global_position) <= 80.0 \
-			and e.has_node("StatusComponent"):
-				e.get_node("StatusComponent").apply("bash", 0.2, 1)
+# _overshield_absorb_duo_procs moved to HeroBase (Batch 6). Shino owns the real
+# `_spawn_status_zone`, so his routing hook calls it directly.
+func _spawn_status_zone_routed(pos: Vector2, radius: float, duration: float, status_id: String, stacks: int, col: Color) -> void:
+	_spawn_status_zone(pos, radius, duration, status_id, stacks, col)
 
 
 # Run 19/20 — Hulk Smash Legendary: combo finishers emit a shockwave.
@@ -3286,7 +3254,10 @@ func _apply_melee_lifesteal(damage_dealt: int) -> void:
 # Called on each Y4 / X3 combo finisher. (Re)starts a 5s 1-HP/sec regen.
 # Stacks with the existing healing pipeline (no special amp; uses raw HP set).
 func _start_baked_apple_hot() -> void:
-	if not RunState.baked_apple_taken:
+	# Run 154 Batch 6 — picker-only self-buff (Run 150b lock; sibling Apple passive
+	# Sweet Dreams gates per-hero too). Was RunState.baked_apple_taken (GLOBAL) — a
+	# rot that let Shino heal from a finisher-HoT only Bea owned. Now per-hero.
+	if not RunState.shino_has("baked_apple"):
 		return
 	_baked_apple_hot_remaining = RunState.BAKED_APPLE_HOT_DURATION
 	_baked_apple_hot_accum = 0.0
@@ -4030,23 +4001,7 @@ func _fire_vine_lash() -> void:
 
 
 # Quick whip-line visual: a slightly bowed Line2D that fades out fast.
-func _spawn_vine_visual(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
-	var vine := Line2D.new()
-	vine.width = 4.0
-	vine.default_color = col
-	vine.z_index = 7
-	var mid: Vector2 = (from_pos + to_pos) * 0.5
-	var perp: Vector2 = (to_pos - from_pos).orthogonal().normalized()
-	var bow: Vector2 = mid + perp * (to_pos - from_pos).length() * 0.12
-	for i in range(9):
-		var t: float = float(i) / 8.0
-		var p: Vector2 = from_pos.lerp(bow, t).lerp(bow.lerp(to_pos, t), t)   # quadratic bezier
-		vine.add_point(p)
-	get_tree().current_scene.add_child(vine)
-	var tw: Tween = vine.create_tween()
-	tw.tween_property(vine, "modulate:a", 0.0, 0.28)
-	tw.tween_callback(vine.queue_free)
-	FX.play_sound("ground_pound", 1.0)
+# _spawn_vine_visual moved to HeroBase (Batch 6).
 
 
 # --- Burrow mound draw helper ---
@@ -5365,10 +5320,11 @@ func _start_ult() -> void:
 	_ult_freeze_targets.clear()
 	FX.play_sound("ult_fire", 1.2)
 	_spawn_ult_flash()
-	if is_in_group("bea"):
-		_run_bea_ult()
-	else:
-		_run_shino_ult()
+	# Run 154 Batch 6 — Player.gd is only ever a Shino instance (it adds itself to
+	# group "player", never "bea"), so the old is_in_group("bea") dispatch to
+	# _run_bea_ult was unreachable. Bea hosts her own live ult in BeaAI.gd
+	# (_start_ult/_tick_ult, blink-position mechanism). Call Shino's directly.
+	_run_shino_ult()
 
 
 func _tick_ult(delta: float) -> void:
@@ -5411,104 +5367,8 @@ func _spawn_ult_flash() -> void:
 	tw.tween_callback(Callable(layer, "queue_free"))
 
 
-# -------------------------------------------------------
-# Bea's Ultimate: Thousand Cut Dance (GDD §8.2.3)
-# -------------------------------------------------------
-# Omnislash-style: blinks to each enemy in distance order, lands one precise
-# cut each, then ends with a climactic final slash + flourish pulse.
-# Damage: BEA_ULT_BLINK_DAMAGE per blink, BEA_ULT_FLOURISH_DAMAGE bonus AoE
-# on the last target (GDD damage values — tune in playtest).
-func _run_bea_ult() -> void:
-	# Collect enemies sorted nearest-first.
-	var all_enemies: Array = []
-	for e in get_tree().get_nodes_in_group("enemy"):
-		if e == null or not is_instance_valid(e) or not e.has_method("take_damage"):
-			continue
-		all_enemies.append(e)
-	all_enemies.sort_custom(func(a, b):
-		return global_position.distance_squared_to(a.global_position) \
-			 < global_position.distance_squared_to(b.global_position))
-
-	# Freeze all enemies (GDD §8.2.3 time-freeze).
-	for e in all_enemies:
-		e.process_mode = Node.PROCESS_MODE_DISABLED
-		_ult_freeze_targets.append(e)
-
-	if all_enemies.is_empty():
-		await get_tree().create_timer(ULT_CINEMATIC_DURATION).timeout
-	else:
-		for i in range(all_enemies.size()):
-			if state != State.ULT_CASTING:
-				break
-			var e = all_enemies[i]
-			if not is_instance_valid(e):
-				continue
-			var is_last: bool = (i == all_enemies.size() - 1)
-
-			# Blink destination: stand BEA_ULT_BLINK_OFFSET px in front of enemy.
-			var to_enemy: Vector2 = (e.global_position - global_position).normalized()
-			if to_enemy.length() < 0.01:
-				to_enemy = Vector2.RIGHT
-			var blink_dest: Vector2 = e.global_position - to_enemy * BEA_ULT_BLINK_OFFSET
-
-			# Departure flash + teleport + arrival flash.
-			_spawn_bea_blink_flash(global_position)
-			global_position = blink_dest
-			facing = to_enemy
-			if to_enemy.x != 0.0:
-				_last_h_dir = 1 if to_enemy.x > 0.0 else -1
-			_spawn_bea_blink_flash(global_position)
-
-			# Slash visual — bigger arc on the final flourish.
-			if is_last:
-				FX.spawn_swing_arc(global_position, to_enemy, 80.0, 200.0,
-					Color(0.90, 0.75, 1.0, 0.80), 0.30)
-				FX.spawn_swing_arc(global_position, to_enemy, 52.0, 155.0,
-					Color(1.0, 0.95, 1.0, 0.55), 0.22)
-				FX.screen_shake(FX.SHAKE_HEAVY, FX.SHAKE_DUR_MED)
-				FX.spawn_burst_particles(e.global_position, Color(0.95, 0.70, 1.0, 1.0), 22)
-			else:
-				FX.spawn_swing_arc(global_position, to_enemy, 56.0, 120.0,
-					Color(0.85, 0.75, 1.0, 0.72), 0.18)
-				FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_SHORT)
-				FX.spawn_burst_particles(e.global_position, Color(0.88, 0.78, 1.0, 1.0), 10)
-
-			# Apply family statuses + deal damage.
-			_apply_family_statuses_on_hit(e, false, false, false, false, true)
-			var was_alive: bool = (not e.has_method("is_alive")) or e.is_alive()
-			e.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
-			e.take_damage(_scale_damage(BEA_ULT_BLINK_DAMAGE, true), to_enemy)
-			if was_alive and e.has_method("is_alive") and not e.is_alive():
-				_apply_charge_kill_heal()
-
-			if is_last:
-				# Brief pause then flourish pulse hits all survivors within radius.
-				await get_tree().create_timer(0.08).timeout
-				_spawn_bea_flourish_pulse(e.global_position)
-				for other in _ult_freeze_targets:
-					if not is_instance_valid(other):
-						continue
-					if other.has_method("is_alive") and not other.is_alive():
-						continue
-					if global_position.distance_to(other.global_position) <= BEA_ULT_FLOURISH_RADIUS:
-						var fdir: Vector2 = (other.global_position - global_position).normalized()
-						if fdir.length() < 0.01:
-							fdir = Vector2.RIGHT
-						other.take_damage(_scale_damage(BEA_ULT_FLOURISH_DAMAGE, true), fdir)
-						FX.spawn_burst_particles(other.global_position, Color(1.0, 0.90, 1.0, 1.0), 8)
-				# Hold the landing pose.
-				await get_tree().create_timer(BEA_ULT_FINAL_HOLD).timeout
-			else:
-				await get_tree().create_timer(BEA_ULT_INTER_HIT_DELAY).timeout
-
-	# Unfreeze survivors.
-	for e in _ult_freeze_targets:
-		if is_instance_valid(e):
-			e.process_mode = Node.PROCESS_MODE_INHERIT
-	_ult_freeze_targets.clear()
-
-	await _do_ult_dizzy()
-	state = State.IDLE
+# _run_bea_ult removed (Batch 6): unreachable dead duplicate — Player.gd is never
+# in group "bea"; Bea's live ult lives in BeaAI.gd. See REFACTOR_HANDOFF Batch 6.
 
 
 # -------------------------------------------------------
@@ -5607,64 +5467,8 @@ func _do_ult_dizzy() -> void:
 	ult_in_dizzy = false
 
 
-# -------------------------------------------------------
-# Bea ult VFX helpers
-# -------------------------------------------------------
-
-# Quick expanding ring at blink departure / arrival.
-func _spawn_bea_blink_flash(pos: Vector2) -> void:
-	var parent: Node = get_tree().current_scene
-	if parent == null:
-		return
-	var ring := Node2D.new()
-	ring.position = pos
-	ring.z_index = 8
-	parent.add_child(ring)
-	var line := Line2D.new()
-	line.width = 4.0
-	line.default_color = Color(0.95, 0.80, 1.0, 0.90)
-	line.joint_mode = Line2D.LINE_JOINT_ROUND
-	line.closed = true
-	var pts: PackedVector2Array = PackedVector2Array()
-	for si in range(16):
-		var a: float = TAU * float(si) / 16.0
-		pts.append(Vector2(cos(a), sin(a)) * 18.0)
-	line.points = pts
-	ring.add_child(line)
-	var tw: Tween = create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(line, "default_color:a", 0.0, 0.20)
-	tw.tween_property(ring, "scale", Vector2(2.2, 2.2), 0.20).set_trans(Tween.TRANS_EXPO)
-	tw.set_parallel(false)
-	tw.tween_callback(Callable(ring, "queue_free"))
-
-
-# Expanding ring centred on last slash target (flourish AoE visual).
-func _spawn_bea_flourish_pulse(pos: Vector2) -> void:
-	var parent: Node = get_tree().current_scene
-	if parent == null:
-		return
-	var ring := Node2D.new()
-	ring.position = pos
-	ring.z_index = 7
-	parent.add_child(ring)
-	var line := Line2D.new()
-	line.width = 6.0
-	line.default_color = Color(0.95, 0.70, 1.0, 0.85)
-	line.joint_mode = Line2D.LINE_JOINT_ROUND
-	line.closed = true
-	var pts: PackedVector2Array = PackedVector2Array()
-	for si in range(20):
-		var a: float = TAU * float(si) / 20.0
-		pts.append(Vector2(cos(a), sin(a)) * BEA_ULT_FLOURISH_RADIUS)
-	line.points = pts
-	ring.add_child(line)
-	var tw: Tween = create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(line, "default_color:a", 0.0, 0.35)
-	tw.tween_property(ring, "scale", Vector2(1.5, 1.5), 0.35).set_trans(Tween.TRANS_EXPO)
-	tw.set_parallel(false)
-	tw.tween_callback(Callable(ring, "queue_free"))
+# _spawn_bea_blink_flash / _spawn_bea_flourish_pulse removed (Batch 6): dead
+# duplicates that only _run_bea_ult (also removed) called. See REFACTOR_HANDOFF.
 
 
 # -------------------------------------------------------
