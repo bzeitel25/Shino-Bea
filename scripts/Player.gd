@@ -454,10 +454,10 @@ var _hitfx: HeroHitFX = null
 # Stacking movement slow. Each stack shaves FROST_SLOW_PER_STACK off move speed;
 # stacks decay one at a time. Applied by the pelican's popsicle hit / icy patch.
 const FROST_MAX_STACKS: int       = 5
-const FROST_SLOW_PER_STACK: float = 0.08   # 5 stacks → ×0.60 move speed (40% slow)
+# FROST_SLOW_PER_STACK moved to HeroBase (Batch 2).
 const FROST_STACK_DECAY: float    = 1.4    # seconds before one stack melts off
 const FROST_OUTLINE_HOLD: float   = 1.2    # icy outline refresh window
-var frost_stacks: int = 0
+# frost_stacks moved to HeroBase (Batch 2).
 var _frost_decay_t: float = 0.0
 
 # Last horizontal direction — persists on idle so sprite faces correctly while standing.
@@ -507,6 +507,7 @@ signal ult_fired()                              # Final Ki Blast cinematic start
 
 
 func _ready() -> void:
+	hero_id = "shino"   # HeroBase identity — per-hero RunState gating key
 	current_hp = max_hp
 	state = State.IDLE
 	add_to_group("player")   # HUD.gd finds player via this group
@@ -601,30 +602,7 @@ func set_player_controlled(val: bool) -> void:
 func _input_device() -> int:
 	return RunState.shino_device
 
-func _act_p(action: String) -> bool:
-	if RunState.two_player:
-		return InputRouter.pressed(_input_device(), action)
-	return Input.is_action_pressed(action)
-
-func _act_jp(action: String) -> bool:
-	if RunState.two_player:
-		return InputRouter.just_pressed(_input_device(), action)
-	return Input.is_action_just_pressed(action)
-
-func _act_jr(action: String) -> bool:
-	if RunState.two_player:
-		return InputRouter.just_released(_input_device(), action)
-	return Input.is_action_just_released(action)
-
-func _move_axis() -> Vector2:
-	if RunState.two_player:
-		return InputRouter.move_vector(_input_device())
-	return Vector2(Input.get_axis("move_left", "move_right"), Input.get_axis("move_up", "move_down"))
-
-func _aim_vec() -> Vector2:
-	if RunState.two_player:
-		return InputRouter.aim_vector(_input_device())
-	return Input.get_vector("aim_left", "aim_right", "aim_up", "aim_down")
+# _act_p/_act_jp/_act_jr/_move_axis/_aim_vec moved to HeroBase (Batch 2).
 
 
 func _physics_process(delta: float) -> void:
@@ -2323,13 +2301,7 @@ func _perform_attack_swing() -> void:
 
 # Run 27 — family-color attack glow: blend the owned slot boon's family color
 # into attack/impact FX. Returns base unchanged when no slot boon is owned.
-func _fx_col(base: Color, slot: String) -> Color:
-	var tint: Color = RunState.get_attack_tint("shino", slot)
-	if tint.a <= 0.0:
-		return base
-	var mixed: Color = base.lerp(tint, 0.65)
-	mixed.a = base.a
-	return mixed
+# _fx_col moved to HeroBase (Batch 2).
 
 
 func _activate_melee_hitbox() -> void:
@@ -4634,10 +4606,7 @@ func add_frost_stack(n: int = 1) -> void:
 
 
 # Movement multiplier from the current frost stacks (1.0 = none).
-func _frost_move_mult() -> float:
-	if frost_stacks <= 0:
-		return 1.0
-	return maxf(0.25, 1.0 - FROST_SLOW_PER_STACK * float(frost_stacks))
+# _frost_move_mult moved to HeroBase (Batch 2).
 
 
 # Run 13 — Team Game Over (called by RunState.resolve_team_down when both

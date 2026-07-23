@@ -433,10 +433,10 @@ var _hitfx: HeroHitFX = null
 # Stacking movement slow (mirrors Player.gd). Applied by the pelican's popsicle
 # hit / icy patch; decays one stack at a time.
 const FROST_MAX_STACKS: int       = 5
-const FROST_SLOW_PER_STACK: float = 0.08
+# FROST_SLOW_PER_STACK moved to HeroBase (Batch 2).
 const FROST_STACK_DECAY: float    = 1.4
 const FROST_OUTLINE_HOLD: float   = 1.2
-var frost_stacks: int = 0
+# frost_stacks moved to HeroBase (Batch 2).
 var _frost_decay_t: float = 0.0
 
 @onready var sprite: ColorRect    = get_node_or_null("Sprite")
@@ -499,6 +499,7 @@ func _bump_combo() -> void:
 
 
 func _ready() -> void:
+	hero_id = "bea"   # HeroBase identity — per-hero RunState gating key
 	current_hp = max_hp
 	add_to_group("bea")
 	add_to_group("player")   # so door trigger and enemy AI can find both characters
@@ -3247,13 +3248,7 @@ func _finish_meteor_dive() -> void:
 
 # Run 27 — family-color attack glow: blend the owned slot boon's family color
 # into Bea's attack/impact FX. Returns base unchanged when no slot boon owned.
-func _fx_col(base: Color, slot: String) -> Color:
-	var tint: Color = RunState.get_attack_tint("bea", slot)
-	if tint.a <= 0.0:
-		return base
-	var mixed: Color = base.lerp(tint, 0.65)
-	mixed.a = base.a
-	return mixed
+# _fx_col moved to HeroBase (Batch 2).
 
 
 func _tap_naginata() -> void:
@@ -5002,10 +4997,7 @@ func add_frost_stack(n: int = 1) -> void:
 		_hitfx.start_frost(FROST_OUTLINE_HOLD, float(frost_stacks) / float(FROST_MAX_STACKS))
 
 
-func _frost_move_mult() -> float:
-	if frost_stacks <= 0:
-		return 1.0
-	return maxf(0.25, 1.0 - FROST_SLOW_PER_STACK * float(frost_stacks))
+# _frost_move_mult moved to HeroBase (Batch 2).
 
 
 # Run 13 — Replaced "hide-and-disable" Phase 6 stub with a proper DOWNED state.
@@ -5762,30 +5754,7 @@ func get_current_chi() -> int:
 func _input_device() -> int:
 	return RunState.bea_device
 
-func _act_p(action: String) -> bool:
-	if RunState.two_player:
-		return InputRouter.pressed(_input_device(), action)
-	return Input.is_action_pressed(action)
-
-func _act_jp(action: String) -> bool:
-	if RunState.two_player:
-		return InputRouter.just_pressed(_input_device(), action)
-	return Input.is_action_just_pressed(action)
-
-func _act_jr(action: String) -> bool:
-	if RunState.two_player:
-		return InputRouter.just_released(_input_device(), action)
-	return Input.is_action_just_released(action)
-
-func _move_axis() -> Vector2:
-	if RunState.two_player:
-		return InputRouter.move_vector(_input_device())
-	return Vector2(Input.get_axis("move_left", "move_right"), Input.get_axis("move_up", "move_down"))
-
-func _aim_vec() -> Vector2:
-	if RunState.two_player:
-		return InputRouter.aim_vector(_input_device())
-	return Input.get_vector("aim_left", "aim_right", "aim_up", "aim_down")
+# _act_p/_act_jp/_act_jr/_move_axis/_aim_vec moved to HeroBase (Batch 2).
 
 
 func set_player_controlled(val: bool) -> void:
