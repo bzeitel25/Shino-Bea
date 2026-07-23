@@ -565,6 +565,21 @@ func _input_device() -> int:
 # _act_p/_act_jp/_act_jr/_move_axis/_aim_vec moved to HeroBase (Batch 2).
 
 
+# ============================================================
+# Batch 8 — controller seam overrides (dispatched by HeroBase._controller_tick).
+# Bodies moved VERBATIM from the old `if player_controlled: … else: …` branch
+# that lived in _physics_process (same spot _controller_tick is now called).
+# ============================================================
+func _player_tick(delta: float) -> void:
+	_handle_input(delta)
+	_tick_stick_fire(delta)   # Run 60 — twin-stick ranged
+
+func _ai_tick(_delta: float) -> void:
+	# Stand still while Bea is controlled; don't interrupt in-flight attacks
+	if state == State.IDLE or state == State.MOVING:
+		velocity = Vector2.ZERO
+
+
 func _physics_process(delta: float) -> void:
 	# Run 150 (Bruno fix 11) — GLOBAL ULT FREEZE: while the OTHER hero's
 	# ultimate cinematic runs, this hero is fully frozen (no input, no AI, no
@@ -618,14 +633,9 @@ func _physics_process(delta: float) -> void:
 		_hit_knockback_vel = _hit_knockback_vel.lerp(Vector2.ZERO, delta * 9.0)
 	else:
 		_hit_knockback_vel = Vector2.ZERO
-	# Phase 6: skip input processing when Bea has control (hot-swap)
-	if player_controlled:
-		_handle_input(delta)
-		_tick_stick_fire(delta)   # Run 60 — twin-stick ranged
-	else:
-		# Stand still while Bea is controlled; don't interrupt in-flight attacks
-		if state == State.IDLE or state == State.MOVING:
-			velocity = Vector2.ZERO
+	# Phase 6: skip input processing when Bea has control (hot-swap).
+	# Batch 8 — controller seam: dispatch to _player_tick / _ai_tick below.
+	_controller_tick(delta)
 	_handle_movement(delta)
 	if state == State.FLURRYING:
 		_tick_flurry(delta)

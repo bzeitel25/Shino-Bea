@@ -847,9 +847,9 @@ func _physics_process(delta: float) -> void:
 			State.BEA_WHIRLING, \
 			State.BEA_FLURRYING, \
 			State.BEA_ULT_CASTING:
-				_handle_player_input(delta)
+				_player_tick(delta)   # Batch 8 — seam: player-input decision layer
 			State.AI_FOLLOW:
-				_handle_ai(delta)
+				_ai_tick(delta)       # Batch 8 — seam: AI decision layer
 			State.REVIVING:
 				_tick_channel_revive(delta)
 
@@ -1181,6 +1181,23 @@ func _on_nameplates_changed(_enabled: bool) -> void:
 #   B / SPACE → Pirouette Dodge (dash with pirouette body spin visual)
 #   U / RT → Thousand Cut Dance ult (blink-chain + final flourish, requires full Chi)
 # ============================================================
+
+# ============================================================
+# Batch 8 — controller seam overrides.
+# Bea's control is encoded in her State enum, so her _physics_process invokes
+# these two hooks DIRECTLY from its state match (not via the player_controlled-
+# keyed HeroBase._controller_tick, which would mis-route her AI-driven combat
+# sub-states). _player_tick is her human-input / combat-sub-state decision
+# layer; _ai_tick is her dancer-AI decision layer. Bodies are the same handlers
+# the match arms called before — this is a rename that names the seam, nothing
+# more. Her enum is deliberately NOT unified (see REFACTOR_HANDOFF Batch 8).
+# ============================================================
+func _player_tick(delta: float) -> void:
+	_handle_player_input(delta)
+
+func _ai_tick(delta: float) -> void:
+	_handle_ai(delta)
+
 
 func _handle_player_input(delta: float) -> void:
 	# ---- Sub-state routing (combat states run their own tick) ----

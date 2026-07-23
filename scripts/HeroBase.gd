@@ -87,6 +87,38 @@ func _frost_move_mult() -> float:
 
 
 # ============================================================
+# Batch 8 (2026-07-23) — CONTROLLER SEAM.
+# "Who is driving this hero" (human input vs AI) is now an explicit, named
+# seam. Each child overrides the two decision-layer hooks; behavior is
+# unchanged — the bodies moved verbatim out of each hero's _physics_process.
+#
+#   _player_tick — the human-input decision layer (poll Input/InputRouter).
+#   _ai_tick     — the AI decision layer (cadence / follow / auto-defend).
+#   _controller_tick — thin dispatcher: player_controlled ? player : ai.
+#
+# Shino's frame flow has a single clean `if player_controlled` branch, so he
+# routes it through _controller_tick. Bea encodes control in her State enum
+# (PLAYER_CONTROLLED / AI_FOLLOW, and combat sub-states that always run the
+# player-input handler even for the AI), so her _physics_process calls the two
+# seam hooks directly from its state match — the dispatcher (which keys purely
+# on player_controlled) would mis-route her AI-driven combat sub-states. Her
+# enum is deliberately NOT unified. Either way both heroes now expose the same
+# named seam. (See REFACTOR_HANDOFF §"Batch 8 report".)
+# ============================================================
+func _player_tick(_delta: float) -> void:
+	pass
+
+func _ai_tick(_delta: float) -> void:
+	pass
+
+func _controller_tick(delta: float) -> void:
+	if player_controlled:
+		_player_tick(delta)
+	else:
+		_ai_tick(delta)
+
+
+# ============================================================
 # Batch 3 extraction (2026-07-23) — overshield / heal / status-gate cluster.
 # Migrated from Player.gd / BeaAI.gd. Per-hero differences resolved via
 # hero_id, child-overridable stubs, and the signal-emit helpers below.
