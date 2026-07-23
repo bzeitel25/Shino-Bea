@@ -1,0 +1,25 @@
+[gd_scene load_steps=6 format=3 uid="uid://family_home"]
+
+[ext_resource type="Script" path="res://scripts/FamilyHome.gd" id="1_home"]
+[ext_resource type="PackedScene" uid="uid://shino_player" path="res://scenes/Player.tscn" id="2_player"]
+[ext_resource type="PackedScene" uid="uid://shino_bea" path="res://scenes/Bea.tscn" id="3_bea"]
+[ext_resource type="PackedScene" path="res://scenes/HUD.tscn" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/CameraFollow.gd" id="5_cam"]
+
+[node name="FamilyHome" type="Node2D"]
+script = ExtResource("1_home")
+
+; ── Interior, elder NPC and exit door are generated procedurally
+;    in FamilyHome.gd from RunState.day_visit_family. ──
+
+[node name="HUD" parent="." instance=ExtResource("4_hud")]
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+position = Vector2(-26, 140)
+
+[node name="Bea" parent="." instance=ExtResource("3_bea")]
+position = Vector2(26, 140)
+
+[node name="Camera2D" type="Camera2D" parent="."]
+zoom = Vector2(1.5, 1.5)
+script = ExtResource("5_cam")

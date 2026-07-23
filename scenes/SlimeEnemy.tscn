@@ -1,0 +1,124 @@
+[gd_scene load_steps=4 format=3 uid="uid://shino_slime_enemy"]
+
+[ext_resource type="Script" path="res://scripts/SlimeEnemy.gd" id="1_slime"]
+[ext_resource type="Script" path="res://scripts/BodyAnimator.gd" id="2_anim"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(22, 22)
+
+[node name="SlimeEnemy" type="CharacterBody2D"]
+collision_layer = 4
+collision_mask = 1
+script = ExtResource("1_slime")
+
+; Body parts are replaced at runtime by EnemySpriteGen (slime jelly dome).
+; Stick skeleton below is only a fallback + the squash/stretch anchor.
+[node name="Body" type="Node2D" parent="."]
+script = ExtResource("2_anim")
+
+[node name="Head" type="ColorRect" parent="Body"]
+offset_left = -5.0
+offset_top = -14.0
+offset_right = 5.0
+offset_bottom = -5.0
+color = Color(0.45, 0.80, 0.55, 1)
+
+[node name="HeadOutline" type="ColorRect" parent="Body"]
+offset_left = -6.0
+offset_top = -15.0
+offset_right = 6.0
+offset_bottom = -14.0
+color = Color(0.12, 0.30, 0.20, 1)
+
+[node name="Torso" type="ColorRect" parent="Body"]
+offset_left = -7.0
+offset_top = -5.0
+offset_right = 7.0
+offset_bottom = 8.0
+color = Color(0.40, 0.78, 0.50, 1)
+
+[node name="TorsoCore" type="ColorRect" parent="Body"]
+offset_left = -2.0
+offset_top = -1.0
+offset_right = 2.0
+offset_bottom = 3.0
+color = Color(0.90, 1.00, 0.92, 0.8)
+
+[node name="ArmL" type="ColorRect" parent="Body"]
+offset_left = -9.0
+offset_top = -3.0
+offset_right = -7.0
+offset_bottom = 6.0
+color = Color(0.40, 0.78, 0.50, 1)
+
+[node name="ArmR" type="ColorRect" parent="Body"]
+offset_left = 7.0
+offset_top = -3.0
+offset_right = 9.0
+offset_bottom = 6.0
+color = Color(0.40, 0.78, 0.50, 1)
+
+[node name="LegL" type="ColorRect" parent="Body"]
+offset_left = -4.0
+offset_top = 8.0
+offset_right = -1.0
+offset_bottom = 13.0
+color = Color(0.22, 0.50, 0.32, 1)
+
+[node name="LegR" type="ColorRect" parent="Body"]
+offset_left = 1.0
+offset_top = 8.0
+offset_right = 4.0
+offset_bottom = 13.0
+color = Color(0.22, 0.50, 0.32, 1)
+
+[node name="EyeL" type="ColorRect" parent="Body"]
+offset_left = -3.0
+offset_top = -11.0
+offset_right = -1.0
+offset_bottom = -9.0
+color = Color(0.10, 0.10, 0.12, 1)
+
+[node name="EyeR" type="ColorRect" parent="Body"]
+offset_left = 1.0
+offset_top = -11.0
+offset_right = 3.0
+offset_bottom = -9.0
+color = Color(0.10, 0.10, 0.12, 1)
+
+[node name="FacingMarker" type="ColorRect" parent="Body"]
+offset_left = -1.0
+offset_top = 10.0
+offset_right = 1.0
+offset_bottom = 14.0
+color = Color(0.12, 0.30, 0.20, 1)
+
+[node name="Sprite" type="ColorRect" parent="."]
+offset_left = -12.0
+offset_top = -16.0
+offset_right = 12.0
+offset_bottom = 14.0
+color = Color(1, 1, 1, 0)
+mouse_filter = 2
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_body")
+
+[node name="HPLabel" type="Label" parent="."]
+offset_left = -28.0
+offset_top = -34.0
+offset_right = 28.0
+offset_bottom = -18.0
+theme_override_font_sizes/font_size = 10
+horizontal_alignment = 1
+text = "70 / 70"
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -28.0
+offset_top = -46.0
+offset_right = 28.0
+offset_bottom = -34.0
+theme_override_font_sizes/font_size = 9
+horizontal_alignment = 1
+modulate = Color(0.7, 1.0, 0.8, 1.0)
+text = "JELLY"

@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://shino_boonoffer"]
+
+[ext_resource type="Script" path="res://scripts/BoonOffer.gd" id="1_boonoffer"]
+
+[node name="BoonOffer" type="CanvasLayer"]
+script = ExtResource("1_boonoffer")
+layer = 100

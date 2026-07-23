@@ -1,0 +1,270 @@
+[gd_scene load_steps=14 format=3 uid="uid://dojo_scene"]
+
+[ext_resource type="Script" path="res://scripts/Dojo.gd" id="1_dojo"]
+[ext_resource type="PackedScene" uid="uid://shino_player" path="res://scenes/Player.tscn" id="2_player"]
+[ext_resource type="PackedScene" uid="uid://shino_bea" path="res://scenes/Bea.tscn" id="3_bea"]
+[ext_resource type="PackedScene" path="res://scenes/HUD.tscn" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/CameraFollow.gd" id="5_cam"]
+[ext_resource type="Script" path="res://scripts/DojoTrainingDummy.gd" id="6_dummy"]
+[ext_resource type="Script" path="res://scripts/SenseiZ.gd" id="7_sensiz"]
+[ext_resource type="Script" path="res://scripts/BoonDispenser.gd" id="8_dispenser"]
+
+[sub_resource type="CircleShape2D" id="5_bed"]
+radius = 60.0
+
+[sub_resource type="CircleShape2D" id="5_bedB"]
+radius = 60.0
+
+[sub_resource type="RectangleShape2D" id="6_dummy"]
+size = Vector2(28, 40)
+
+[sub_resource type="CircleShape2D" id="7_sensei"]
+radius = 80.0
+
+[sub_resource type="CircleShape2D" id="8_dispenser"]
+radius = 70.0
+
+[node name="Dojo" type="Node2D"]
+script = ExtResource("1_dojo")
+
+; ── Floor, walls, backdrop and decor are now generated procedurally
+;    in Dojo.gd (_build_environment) via DojoTerrain.gd. ──
+
+; ── Shino's bed (inside his NORTH side room) ───────────────
+[node name="ShinoBed" type="Area2D" parent="."]
+position = Vector2(340, -450)
+collision_layer = 0
+collision_mask = 2
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ShinoBed"]
+shape = SubResource("5_bed")
+[node name="Futon" type="ColorRect" parent="ShinoBed"]
+offset_left = -44.0
+offset_top = -30.0
+offset_right = 44.0
+offset_bottom = 30.0
+color = Color(0.86, 0.83, 0.74, 1)
+z_index = -5
+[node name="Blanket" type="ColorRect" parent="ShinoBed"]
+offset_left = -44.0
+offset_top = 4.0
+offset_right = 44.0
+offset_bottom = 30.0
+color = Color(0.22, 0.30, 0.54, 1)
+z_index = -4
+[node name="Pillow" type="ColorRect" parent="ShinoBed"]
+offset_left = -30.0
+offset_top = -28.0
+offset_right = 30.0
+offset_bottom = -12.0
+color = Color(0.93, 0.91, 0.85, 1)
+z_index = -4
+[node name="BedLabel" type="Label" parent="ShinoBed"]
+offset_left = -48.0
+offset_top = 34.0
+offset_right = 48.0
+offset_bottom = 54.0
+text = "Shino's Bed"
+horizontal_alignment = 1
+modulate = Color(0.80, 0.82, 0.95, 1)
+[node name="Prompt" type="Label" parent="ShinoBed"]
+offset_left = -80.0
+offset_top = -62.0
+offset_right = 80.0
+offset_bottom = -42.0
+text = "[E]  Sleep"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+modulate = Color(1.0, 0.95, 0.50, 1)
+visible = false
+
+; ── Bea's mat (inside her EAST side room) ──────────────────
+[node name="BeaBed" type="Area2D" parent="."]
+position = Vector2(640, -130)
+collision_layer = 0
+collision_mask = 2
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BeaBed"]
+shape = SubResource("5_bedB")
+[node name="Futon" type="ColorRect" parent="BeaBed"]
+offset_left = -44.0
+offset_top = -30.0
+offset_right = 44.0
+offset_bottom = 30.0
+color = Color(0.88, 0.82, 0.78, 1)
+z_index = -5
+[node name="Blanket" type="ColorRect" parent="BeaBed"]
+offset_left = -44.0
+offset_top = 4.0
+offset_right = 44.0
+offset_bottom = 30.0
+color = Color(0.62, 0.32, 0.46, 1)
+z_index = -4
+[node name="Pillow" type="ColorRect" parent="BeaBed"]
+offset_left = -30.0
+offset_top = -28.0
+offset_right = 30.0
+offset_bottom = -12.0
+color = Color(0.95, 0.90, 0.90, 1)
+z_index = -4
+[node name="BedLabel" type="Label" parent="BeaBed"]
+offset_left = -48.0
+offset_top = 34.0
+offset_right = 48.0
+offset_bottom = 54.0
+text = "Bea's Mat"
+horizontal_alignment = 1
+modulate = Color(0.95, 0.78, 0.88, 1)
+[node name="Prompt" type="Label" parent="BeaBed"]
+offset_left = -80.0
+offset_top = -62.0
+offset_right = 80.0
+offset_bottom = -42.0
+text = "[E]  Sleep"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+modulate = Color(1.0, 0.95, 0.50, 1)
+visible = false
+
+
+[node name="HUD" parent="." instance=ExtResource("4_hud")]
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+position = Vector2(0, 80)
+
+[node name="Bea" parent="." instance=ExtResource("3_bea")]
+position = Vector2(60, 80)
+
+[node name="TrainingDummy" type="CharacterBody2D" parent="."]
+position = Vector2(-340, -180)
+script = ExtResource("6_dummy")
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TrainingDummy"]
+shape = SubResource("6_dummy")
+[node name="BodyRect" type="ColorRect" parent="TrainingDummy"]
+offset_left = -14.0
+offset_top = -20.0
+offset_right = 14.0
+offset_bottom = 20.0
+color = Color(0.72, 0.50, 0.28, 1.0)
+[node name="HeadCircle" type="ColorRect" parent="TrainingDummy"]
+offset_left = -10.0
+offset_top = -34.0
+offset_right = 10.0
+offset_bottom = -22.0
+color = Color(0.65, 0.45, 0.25, 1.0)
+[node name="NameLabel" type="Label" parent="TrainingDummy"]
+offset_left = -40.0
+offset_top = 22.0
+offset_right = 40.0
+offset_bottom = 38.0
+text = "TRAINING DUMMY"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+modulate = Color(0.9, 0.8, 0.5, 1)
+[node name="StatsLabel" type="Label" parent="TrainingDummy"]
+offset_left = -50.0
+offset_top = -60.0
+offset_right = 50.0
+offset_bottom = -38.0
+text = "Hit me!"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+modulate = Color(1.0, 0.9, 0.4, 1)
+
+[node name="SenseiZ" type="Node2D" parent="."]
+position = Vector2(0, -190)
+script = ExtResource("7_sensiz")
+[node name="Body" type="ColorRect" parent="SenseiZ"]
+offset_left = -16.0
+offset_top = -32.0
+offset_right = 16.0
+offset_bottom = 16.0
+color = Color(0.15, 0.25, 0.45, 1.0)
+[node name="Head" type="ColorRect" parent="SenseiZ"]
+offset_left = -12.0
+offset_top = -48.0
+offset_right = 12.0
+offset_bottom = -34.0
+color = Color(0.70, 0.55, 0.35, 1.0)
+[node name="NameLabel" type="Label" parent="SenseiZ"]
+offset_left = -50.0
+offset_top = 20.0
+offset_right = 50.0
+offset_bottom = 38.0
+text = "Sensei Z"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 12
+modulate = Color(0.85, 0.70, 0.25, 1)
+[node name="SparkLabel" type="Label" parent="SenseiZ"]
+offset_left = -60.0
+offset_top = 38.0
+offset_right = 60.0
+offset_bottom = 54.0
+text = ""
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+modulate = Color(0.85, 0.45, 0.10, 1)
+[node name="SenseiArea" type="Area2D" parent="SenseiZ"]
+collision_layer = 0
+collision_mask = 2
+[node name="CollisionShape2D" type="CollisionShape2D" parent="SenseiZ/SenseiArea"]
+shape = SubResource("7_sensei")
+[node name="InteractPrompt" type="Label" parent="SenseiZ"]
+offset_left = -80.0
+offset_top = -72.0
+offset_right = 80.0
+offset_bottom = -52.0
+text = "[E]  Train with Sensei Z"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+modulate = Color(1.0, 0.88, 0.40, 1)
+visible = false
+
+; ── Boon Dispenser (north wall, a bit east of the Training Dummy) ──
+[node name="BoonDispenser" type="Node2D" parent="."]
+position = Vector2(-200, -228)
+script = ExtResource("8_dispenser")
+[node name="Body" type="ColorRect" parent="BoonDispenser"]
+offset_left = -22.0
+offset_top = -36.0
+offset_right = 22.0
+offset_bottom = 20.0
+color = Color(0.16, 0.38, 0.32, 1.0)
+[node name="Slot" type="ColorRect" parent="BoonDispenser"]
+offset_left = -14.0
+offset_top = -28.0
+offset_right = 14.0
+offset_bottom = -6.0
+color = Color(0.35, 0.85, 0.65, 0.85)
+[node name="Tray" type="ColorRect" parent="BoonDispenser"]
+offset_left = -14.0
+offset_top = 4.0
+offset_right = 14.0
+offset_bottom = 14.0
+color = Color(0.08, 0.18, 0.15, 1.0)
+[node name="NameLabel" type="Label" parent="BoonDispenser"]
+offset_left = -60.0
+offset_top = 24.0
+offset_right = 60.0
+offset_bottom = 40.0
+text = "BOON DISPENSER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+modulate = Color(0.45, 0.90, 0.70, 1)
+[node name="DispenserArea" type="Area2D" parent="BoonDispenser"]
+collision_layer = 0
+collision_mask = 2
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BoonDispenser/DispenserArea"]
+shape = SubResource("8_dispenser")
+[node name="InteractPrompt" type="Label" parent="BoonDispenser"]
+offset_left = -80.0
+offset_top = -60.0
+offset_right = 80.0
+offset_bottom = -40.0
+text = "[E]  Dispense boons"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+modulate = Color(0.55, 1.0, 0.75, 1)
+visible = false
+
+[node name="Camera2D" type="Camera2D" parent="."]
+zoom = Vector2(1.5, 1.5)
+script = ExtResource("5_cam")

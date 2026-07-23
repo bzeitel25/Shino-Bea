@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://csavefile001"]
+
+[ext_resource type="Script" uid="uid://csavescript001" path="res://scripts/SaveFileSelect.gd" id="1_save"]
+
+[node name="SaveFileSelect" type="Control" unique_id=100000001]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_save")

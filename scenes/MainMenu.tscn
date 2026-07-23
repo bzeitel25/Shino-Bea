@@ -1,0 +1,180 @@
+[gd_scene format=3 uid="uid://bbjm0hqqm3kmc"]
+
+[ext_resource type="Script" uid="uid://dep6e11li6qnn" path="res://scripts/MainMenu.gd" id="1_menu"]
+
+[node name="MainMenu" type="Control" unique_id=223690441]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_menu")
+
+[node name="BackgroundDark" type="ColorRect" parent="." unique_id=1830234502]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.04, 0.03, 0.06, 1)
+
+[node name="BackgroundGradient" type="ColorRect" parent="." unique_id=136588471]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.08, 0.06, 0.12, 0.55)
+
+[node name="VignetteTop" type="ColorRect" parent="." unique_id=41443096]
+layout_mode = 0
+anchor_right = 1.0
+offset_bottom = 220.0
+color = Color(0, 0, 0, 0.35)
+
+[node name="VignetteBottom" type="ColorRect" parent="." unique_id=982782051]
+layout_mode = 0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -160.0
+color = Color(0, 0, 0, 0.45)
+
+[node name="TitleLabel" type="Label" parent="." unique_id=68168816]
+layout_mode = 0
+offset_top = 90.0
+offset_right = 1280.0
+offset_bottom = 200.0
+theme_override_colors/font_color = Color(0.96, 0.82, 0.32, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.85)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 3
+theme_override_font_sizes/font_size = 84
+text = "SHINO  &  BEA"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="." unique_id=969911463]
+layout_mode = 0
+offset_top = 200.0
+offset_right = 1280.0
+offset_bottom = 240.0
+theme_override_colors/font_color = Color(0.78, 0.72, 0.85, 0.9)
+theme_override_font_sizes/font_size = 22
+text = "ninja roguelike prototype"
+horizontal_alignment = 1
+
+[node name="VersionLabel" type="Label" parent="." unique_id=39671833]
+layout_mode = 0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -28.0
+offset_right = -16.0
+offset_bottom = -8.0
+theme_override_colors/font_color = Color(0.5, 0.5, 0.6, 0.7)
+theme_override_font_sizes/font_size = 12
+text = "Run 23 build — 2026-06-01"
+horizontal_alignment = 2
+
+[node name="CenterStack" type="VBoxContainer" parent="." unique_id=1917405963]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -170.0
+offset_top = -20.0
+offset_right = 170.0
+offset_bottom = 220.0
+theme_override_constants/separation = 18
+alignment = 1
+
+[node name="StartButton" type="Button" parent="CenterStack" unique_id=1892202730]
+custom_minimum_size = Vector2(340, 64)
+layout_mode = 2
+text = "START"
+
+[node name="ControlsButton" type="Button" parent="CenterStack" unique_id=1374597216]
+custom_minimum_size = Vector2(340, 56)
+layout_mode = 2
+text = "CONTROLS"
+
+[node name="QuitButton" type="Button" parent="CenterStack" unique_id=1780554531]
+custom_minimum_size = Vector2(340, 56)
+layout_mode = 2
+text = "QUIT"
+
+[node name="HintLabel" type="Label" parent="." unique_id=1868793025]
+layout_mode = 0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -32.0
+offset_right = 540.0
+offset_bottom = -10.0
+theme_override_colors/font_color = Color(0.65, 0.6, 0.75, 0.7)
+theme_override_font_sizes/font_size = 13
+text = "↑/↓ navigate   ENTER select   ESC back"
+
+[node name="ControlsOverlay" type="Control" parent="." unique_id=1975701302]
+visible = false
+anchors_preset = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="DimBg" type="ColorRect" parent="ControlsOverlay" unique_id=1365723547]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0, 0, 0, 0.7)
+
+[node name="Panel" type="Panel" parent="ControlsOverlay" unique_id=1475343969]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -380.0
+offset_top = -260.0
+offset_right = 380.0
+offset_bottom = 260.0
+
+[node name="OverlayTitle" type="Label" parent="ControlsOverlay/Panel" unique_id=1956614082]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 736.0
+offset_bottom = 68.0
+theme_override_colors/font_color = Color(0.96, 0.82, 0.32, 1)
+theme_override_font_sizes/font_size = 28
+text = "CONTROLS"
+horizontal_alignment = 1
+
+[node name="ControlsBody" type="Label" parent="ControlsOverlay/Panel" unique_id=320024289]
+layout_mode = 0
+offset_left = 36.0
+offset_top = 80.0
+offset_right = 724.0
+offset_bottom = 440.0
+theme_override_colors/font_color = Color(0.88, 0.88, 0.93, 1)
+theme_override_font_sizes/font_size = 16
+text = "Movement: WASD / Left Stick
+
+Light combo  (Y): J  /  X
+Heavy combo  (X): K  /  Y
+Ranged       (A): L  /  RB
+Dash         (B): SPACE  /  A button
+Charge attack:    HOLD the attack button
+Ult:              U  /  Right Trigger
+Swap character:   Q double-tap  /  LB
+Interact / Revive: E  /  B
+Pause:            ESC  /  START
+
+Press ESC or B to close this panel."
+
+[node name="CloseButton" type="Button" parent="ControlsOverlay/Panel" unique_id=1921772707]
+layout_mode = 0
+offset_left = 290.0
+offset_top = 460.0
+offset_right = 470.0
+offset_bottom = 500.0
+text = "CLOSE"

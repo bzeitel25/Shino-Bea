@@ -1,0 +1,90 @@
+[gd_scene load_steps=2 format=3 uid="uid://shino_run_complete"]
+
+[ext_resource type="Script" path="res://scripts/RunComplete.gd" id="1_runcomplete"]
+
+[node name="RunComplete" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_runcomplete")
+
+[node name="Background" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.04, 0.03, 0.07, 1)
+
+[node name="GradientOverlay" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.12, 0.06, 0.04, 0.45)
+
+[node name="VignetteTop" type="ColorRect" parent="."]
+anchor_right = 1.0
+offset_bottom = 180.0
+color = Color(0, 0, 0, 0.35)
+
+[node name="BigTitle" type="Label" parent="."]
+offset_left = 0.0
+offset_top = 130.0
+offset_right = 1280.0
+offset_bottom = 240.0
+theme_override_font_sizes/font_size = 92
+theme_override_colors/font_color = Color(1.0, 0.86, 0.30, 1.0)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 4
+theme_override_constants/shadow_offset_y = 4
+horizontal_alignment = 1
+text = "RUN  COMPLETE"
+
+[node name="Subtitle" type="Label" parent="."]
+offset_left = 0.0
+offset_top = 240.0
+offset_right = 1280.0
+offset_bottom = 280.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.9, 0.85, 0.95, 0.92)
+horizontal_alignment = 1
+text = "The Shadow Commander is defeated."
+
+[node name="Subtitle2" type="Label" parent="."]
+offset_left = 0.0
+offset_top = 282.0
+offset_right = 1280.0
+offset_bottom = 320.0
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.78, 0.72, 0.85, 0.85)
+horizontal_alignment = 1
+text = "Shino & Bea live to fight another day."
+
+[node name="SummaryLabel" type="Label" parent="."]
+offset_left = 0.0
+offset_top = 360.0
+offset_right = 1280.0
+offset_bottom = 400.0
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.75, 0.85, 0.95, 0.9)
+horizontal_alignment = 1
+text = "Summary loading..."
+
+[node name="ReturnButton" type="Button" parent="."]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -180.0
+offset_top = 110.0
+offset_right = 180.0
+offset_bottom = 170.0
+text = "RETURN TO MAIN MENU"
+
+[node name="HintLabel" type="Label" parent="."]
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = -36.0
+offset_right = 1280.0
+offset_bottom = -12.0
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.6, 0.55, 0.7, 0.75)
+horizontal_alignment = 1
+text = "ENTER  or  A  to confirm"

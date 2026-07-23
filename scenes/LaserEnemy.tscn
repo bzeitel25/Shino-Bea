@@ -1,0 +1,124 @@
+[gd_scene load_steps=4 format=3 uid="uid://shino_laser_enemy"]
+
+[ext_resource type="Script" path="res://scripts/LaserEnemy.gd" id="1_laser"]
+[ext_resource type="Script" path="res://scripts/BodyAnimator.gd" id="2_anim"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(20, 32)
+
+[node name="LaserEnemy" type="CharacterBody2D"]
+collision_layer = 4
+collision_mask = 1
+script = ExtResource("1_laser")
+
+; Body parts are replaced at runtime by EnemySpriteGen (ranged silhouette).
+; The stick figure below is only a fallback skeleton + animation anchor.
+[node name="Body" type="Node2D" parent="."]
+script = ExtResource("2_anim")
+
+[node name="Head" type="ColorRect" parent="Body"]
+offset_left = -5.0
+offset_top = -16.0
+offset_right = 5.0
+offset_bottom = -6.0
+color = Color(0.95, 0.55, 0.25, 1)
+
+[node name="HeadOutline" type="ColorRect" parent="Body"]
+offset_left = -6.0
+offset_top = -17.0
+offset_right = 6.0
+offset_bottom = -16.0
+color = Color(0.35, 0.15, 0.05, 1)
+
+[node name="Torso" type="ColorRect" parent="Body"]
+offset_left = -6.0
+offset_top = -6.0
+offset_right = 6.0
+offset_bottom = 7.0
+color = Color(0.90, 0.45, 0.15, 1)
+
+[node name="TorsoCore" type="ColorRect" parent="Body"]
+offset_left = -2.0
+offset_top = -2.0
+offset_right = 2.0
+offset_bottom = 2.0
+color = Color(1.00, 0.92, 0.55, 0.9)
+
+[node name="ArmL" type="ColorRect" parent="Body"]
+offset_left = -9.0
+offset_top = -5.0
+offset_right = -6.0
+offset_bottom = 7.0
+color = Color(0.90, 0.45, 0.15, 1)
+
+[node name="ArmR" type="ColorRect" parent="Body"]
+offset_left = 6.0
+offset_top = -5.0
+offset_right = 9.0
+offset_bottom = 9.0
+color = Color(0.90, 0.45, 0.15, 1)
+
+[node name="LegL" type="ColorRect" parent="Body"]
+offset_left = -4.0
+offset_top = 7.0
+offset_right = -1.0
+offset_bottom = 17.0
+color = Color(0.45, 0.20, 0.08, 1)
+
+[node name="LegR" type="ColorRect" parent="Body"]
+offset_left = 1.0
+offset_top = 7.0
+offset_right = 4.0
+offset_bottom = 17.0
+color = Color(0.45, 0.20, 0.08, 1)
+
+[node name="EyeL" type="ColorRect" parent="Body"]
+offset_left = -3.0
+offset_top = -13.0
+offset_right = -1.0
+offset_bottom = -11.0
+color = Color(0.10, 0.05, 0.05, 1)
+
+[node name="EyeR" type="ColorRect" parent="Body"]
+offset_left = 1.0
+offset_top = -13.0
+offset_right = 3.0
+offset_bottom = -11.0
+color = Color(0.10, 0.05, 0.05, 1)
+
+[node name="FacingMarker" type="ColorRect" parent="Body"]
+offset_left = -1.0
+offset_top = 14.0
+offset_right = 1.0
+offset_bottom = 19.0
+color = Color(0.35, 0.15, 0.05, 1)
+
+[node name="Sprite" type="ColorRect" parent="."]
+offset_left = -10.0
+offset_top = -18.0
+offset_right = 14.0
+offset_bottom = 18.0
+color = Color(1, 1, 1, 0)
+mouse_filter = 2
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_body")
+
+[node name="HPLabel" type="Label" parent="."]
+offset_left = -28.0
+offset_top = -36.0
+offset_right = 28.0
+offset_bottom = -20.0
+theme_override_font_sizes/font_size = 10
+horizontal_alignment = 1
+text = "46 / 46"
+
+[node name="NameLabel" type="Label" parent="."]
+offset_left = -28.0
+offset_top = -48.0
+offset_right = 28.0
+offset_bottom = -36.0
+theme_override_font_sizes/font_size = 9
+horizontal_alignment = 1
+modulate = Color(1.0, 0.7, 0.4, 1.0)
+text = "LASER"

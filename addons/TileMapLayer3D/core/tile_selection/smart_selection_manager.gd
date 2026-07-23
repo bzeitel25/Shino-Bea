@@ -1,0 +1,343 @@
+class_name SmartSelectManager
+extends RefCounted
+
+
+## Cardinal directions only (4-connected flood fill, no diagonals)
+const CARDINAL_DIRS: Array[String] = ["N", "E", "S", "W"]
+
+
+## Pick the tile closest to the ray origin along ray_dir.
+## Returns the PlacedTileInfo for the hit tile (with tile_key populated) or null if no hit.
+## Callers convert from camera + screen_pos via Camera3D.project_ray_origin/normal().
+static func pick_tile_at(ray_origin: Vector3, ray_dir: Vector3, tile_map_layer: TileMapLayer3D, max_distance: float = INF) -> PlacedTileInfo:
+	var grid_size: float = tile_map_layer.settings.grid_size
+	var world_ray_dir: Vector3 = ray_dir.normalized()
+	if world_ray_dir.is_zero_approx():
+		return null
+	var node_inv: Transform3D = tile_map_layer.global_transform.affine_inverse()
+	var local_ray_origin: Vector3 = node_inv * ray_origin
+	var local_ray_end: Vector3 = node_inv * (ray_origin + world_ray_dir)
+	if not is_inf(max_distance):
+		local_ray_end = node_inv * (ray_origin + world_ray_dir * max_distance)
+	var local_ray_vector: Vector3 = local_ray_end - local_ray_origin
+	if local_ray_vector.is_zero_approx():
+		return null
+	var local_ray_dir: Vector3 = local_ray_vector.normalized()
+	var local_max_distance: float = INF if is_inf(max_distance) else local_ray_vector.length()
+
+	var closest_t: float = INF
+	var closest_world_t: float = INF
+	var closest_index: int = -1
+	var closest_vertex_key: int = -1
+
+	# Diagnostic counters (gated by GlobalConstants.DEBUG_PICK_RAYCAST).
+	# tiles_tested = total loop iterations (cheap AABB pre-test cost)
+	# tiles_full   = survivors that did the full transform + ray-triangle test
+	var tiles_tested: int = 0
+	var tiles_full: int = 0
+	var regions_hit: int = 0
+	var diag_visited: Array[int] = [0]
+	var debug_on: bool = GlobalConstants.DEBUG_PICK_RAYCAST
+
+	# 3D DDA march through the 30-unit region grid in distance order, considering
+	# both columnar tiles and vertex-edited tiles per region. Sorted traversal lets
+	# us break the moment the next region's entry distance is already past the
+	# closest hit so far. Falls back to a full O(N) scan if the region system is
+	# empty (before the first chunk rebuild).
+	var visited_chunks: Array[TerrainRegionChunk] = []
+	var visited_t_enter: PackedFloat32Array = PackedFloat32Array()
+	if not tile_map_layer.region_system._registry.is_empty():
+		var diag_arg: Array[int] = diag_visited if debug_on else ([] as Array[int])
+		tile_map_layer.region_system.ray_march_regions(
+			local_ray_origin, local_ray_dir, local_max_distance,
+			visited_chunks, visited_t_enter, diag_arg)
+
+		var visited_count: int = visited_chunks.size()
+		for r_idx: int in range(visited_count):
+			var t_enter: float = visited_t_enter[r_idx]
+			# Distance-ordered early-out: any region entered past the current
+			# closest hit cannot improve it.
+			if closest_t < INF and t_enter >= closest_t:
+				break
+			var region: TerrainRegionChunk = visited_chunks[r_idx]
+			# Per-region AABB sanity check — catches diagonals where DDA stepped
+			# through the cell index but the ray actually misses the AABB.
+			if not region.world_aabb.intersects_ray(local_ray_origin, local_ray_dir):
+				continue
+			regions_hit += 1
+
+			# Columnar tiles in this region — cheap AABB pre-test, then full
+			# transform + ray-triangle on survivors only.
+			for col_idx: int in region.columnar_indices:
+				if col_idx < 0:
+					continue
+				tiles_tested += 1
+				var tile_aabb: AABB = tile_map_layer.read_tile_world_aabb_at_index(col_idx)
+				if not tile_aabb.intersects_ray(local_ray_origin, local_ray_dir):
+					continue
+				tiles_full += 1
+				var tile_info: PlacedTileInfo = tile_map_layer.get_tile_info_at_index(col_idx)
+				if tile_info == null:
+					continue
+				var transform: Transform3D = _build_tile_transform(tile_info, grid_size)
+				var t: float = _ray_quad_intersect(local_ray_origin, local_ray_dir, transform, grid_size)
+				if t <= 0.0 or t >= local_max_distance or t >= closest_t:
+					continue
+				var world_t: float = _world_hit_distance_from_local_t(
+					local_ray_origin, local_ray_dir, t, tile_map_layer.global_transform, ray_origin)
+				if world_t >= max_distance or world_t >= closest_world_t:
+					continue
+				closest_t = t
+				closest_world_t = world_t
+				closest_index = col_idx
+				closest_vertex_key = -1
+
+			# Vertex-edited tiles in this region — corners stored in WORLD space,
+			# so we use the world-space ray. Möller-Trumbore is single-sided;
+			# retry with reversed winding to cover back faces.
+			for vtx_key: int in region.vertex_tile_keys:
+				tiles_tested += 1
+				var raw_e = tile_map_layer._vertex_tile_corners.get(vtx_key, null)
+				if not raw_e is VertexTileEntry:
+					continue
+				var entry: VertexTileEntry = raw_e
+				var corners: PackedVector3Array = entry.corners
+				if corners.size() != 4:
+					continue
+				var t1: float = _ray_triangle_intersect(ray_origin, world_ray_dir, corners[3], corners[2], corners[1])
+				if t1 < 0.0:
+					t1 = _ray_triangle_intersect(ray_origin, world_ray_dir, corners[1], corners[2], corners[3])
+				if t1 > 0.0 and t1 < closest_world_t and t1 < max_distance:
+					closest_world_t = t1
+					closest_t = t1
+					closest_vertex_key = vtx_key
+					closest_index = -1
+				var t2: float = _ray_triangle_intersect(ray_origin, world_ray_dir, corners[3], corners[1], corners[0])
+				if t2 < 0.0:
+					t2 = _ray_triangle_intersect(ray_origin, world_ray_dir, corners[0], corners[1], corners[3])
+				if t2 > 0.0 and t2 < closest_world_t and t2 < max_distance:
+					closest_world_t = t2
+					closest_t = t2
+					closest_vertex_key = vtx_key
+					closest_index = -1
+	else:
+		# Fallback: region system not yet populated. Silent — no per-call print.
+		var tile_count: int = tile_map_layer.get_tile_count()
+		tiles_tested = tile_count
+		for i: int in range(tile_count):
+			var tile_info: PlacedTileInfo = tile_map_layer.get_tile_info_at_index(i)
+			if tile_info == null:
+				continue
+			var transform: Transform3D = _build_tile_transform(tile_info, grid_size)
+			var t: float = _ray_quad_intersect(local_ray_origin, local_ray_dir, transform, grid_size)
+			if t > 0.0 and t < local_max_distance:
+				var world_t: float = _world_hit_distance_from_local_t(
+					local_ray_origin, local_ray_dir, t, tile_map_layer.global_transform, ray_origin)
+				if world_t >= max_distance or world_t >= closest_world_t:
+					continue
+				closest_t = t
+				closest_world_t = world_t
+				closest_index = i
+				closest_vertex_key = -1
+
+	if debug_on:
+		var hit_str: String = "none"
+		if closest_vertex_key != -1:
+			hit_str = "vtx:" + str(closest_vertex_key)
+		elif closest_index >= 0:
+			hit_str = "col:" + str(closest_index)
+		print("[pick_tile_at] regions_visited=", diag_visited[0],
+				"  regions_hit=", regions_hit,
+				"  tiles_tested=", tiles_tested,
+				"  tiles_full=", tiles_full,
+				"  hit=", hit_str)
+
+	# Vertex tile won
+	if closest_vertex_key != -1:
+		var raw_vtx = tile_map_layer._vertex_tile_corners.get(closest_vertex_key, null)
+		var vtx_entry: VertexTileEntry = raw_vtx if raw_vtx is VertexTileEntry else null
+		var vertex_tile_info: PlacedTileInfo = vtx_entry.tile_info if vtx_entry != null else null
+		if vertex_tile_info != null:
+			vertex_tile_info.tile_key = closest_vertex_key
+		return vertex_tile_info
+
+	if closest_index < 0:
+		return null
+
+	var tile_info: PlacedTileInfo = tile_map_layer.get_tile_info_at_index(closest_index)
+	if tile_info == null:
+		return null
+	tile_info.tile_key = GlobalUtil.make_tile_key(tile_info.grid_position, tile_info.orientation)
+	return tile_info
+
+
+static func _world_hit_distance_from_local_t(local_ray_origin: Vector3, local_ray_dir: Vector3,
+		t: float, node_transform: Transform3D, world_ray_origin: Vector3) -> float:
+	var local_hit: Vector3 = local_ray_origin + local_ray_dir * t
+	var world_hit: Vector3 = node_transform * local_hit
+	return world_ray_origin.distance_to(world_hit)
+
+
+## Flood fill from a start tile, expanding to contiguous neighbors on the same plane.
+## match_uv = true  → only expand to neighbors with identical UV (magic wand)
+## match_uv = false → expand to ALL neighbors on same plane (connected region)
+## Returns Array of tile_keys for all selected tiles (including start tile).
+static func pick_flood_fill(start_key: int, tile_map_layer: TileMapLayer3D, match_uv: bool = true) -> Array[int]:
+	var start_index: int = tile_map_layer.get_tile_index(start_key)
+	if start_index < 0:
+		return []
+
+	var start_data: PlacedTileInfo = tile_map_layer.get_tile_info_at_index(start_index)
+	if start_data == null:
+		return []
+	var orientation: int = start_data.orientation
+	var start_uv: Rect2 = start_data.uv_rect
+
+	# Map tilted orientations (6-25) to their base (0-5) for neighbor lookups
+	var base_orientation: int = orientation
+	var is_tilted: bool = false
+	if not PlaneCoordinateMapper.is_supported_orientation(orientation):
+		var ori_data: Dictionary = GlobalUtil.ORIENTATION_DATA.get(orientation, {})
+		if ori_data.is_empty():
+			return [start_key]
+		base_orientation = ori_data["base"]
+		is_tilted = true
+
+	# For tilted tiles: collect all same-orientation tiles for adjacency checks
+	var tilted_tiles: Array = []  # Array of {key: int, pos: Vector3}
+	if is_tilted:
+		var tile_count: int = tile_map_layer.get_tile_count()
+		for i: int in range(tile_count):
+			var data: PlacedTileInfo = tile_map_layer.get_tile_info_at_index(i)
+			if data == null or data.orientation != orientation:
+				continue
+			tilted_tiles.append({
+				"key": GlobalUtil.make_tile_key(data.grid_position, orientation),
+				"pos": data.grid_position
+			})
+
+	# Grid snap size for threshold scaling
+	var snap: float = tile_map_layer.settings.grid_snap_size
+
+	# BFS
+	var visited: Dictionary = {}
+	var queue: Array[int] = [start_key]
+	var result: Array[int] = []
+
+	while queue.size() > 0:
+		var current_key: int = queue.pop_front()
+		if visited.has(current_key):
+			continue
+		visited[current_key] = true
+		result.append(current_key)
+
+		var current_index: int = tile_map_layer.get_tile_index(current_key)
+		var current_data: PlacedTileInfo = tile_map_layer.get_tile_info_at_index(current_index)
+		if current_data == null:
+			continue
+		var current_pos: Vector3 = current_data.grid_position
+
+		if is_tilted:
+			# Tilted path: check all same-orientation tiles for cardinal adjacency
+			for candidate: Dictionary in tilted_tiles:
+				if visited.has(candidate["key"]):
+					continue
+				if not _is_tilted_cardinal_neighbor(current_pos, candidate["pos"], base_orientation, snap):
+					continue
+				if match_uv:
+					var neighbor_uv: Rect2 = tile_map_layer.get_tile_uv_rect(candidate["key"])
+					if not neighbor_uv.is_equal_approx(start_uv):
+						continue
+				queue.append(candidate["key"])
+		else:
+			# Base path: direct neighbor calculation (no lookup needed)
+			for dir: String in CARDINAL_DIRS:
+				var neighbor_pos: Vector3 = PlaneCoordinateMapper.get_neighbor_position_3d(
+					current_pos, base_orientation, dir)
+				var neighbor_key: int = GlobalUtil.make_tile_key(neighbor_pos, orientation)
+				if visited.has(neighbor_key):
+					continue
+				if not tile_map_layer.has_tile(neighbor_key):
+					continue
+				if match_uv:
+					var neighbor_uv: Rect2 = tile_map_layer.get_tile_uv_rect(neighbor_key)
+					if not neighbor_uv.is_equal_approx(start_uv):
+						continue
+				queue.append(neighbor_key)
+
+	return result
+
+
+## Check if two tilted tiles are cardinal neighbors on their base plane.
+## Cardinal = one base-plane axis differs by ~snap, the other is ~0.
+## For 45° ramps, a ramp step changes one plane axis AND depth by ~snap (tan(45°)=1),
+## so dist² = 2*snap². Threshold 2.5*snap² covers this with tolerance.
+static func _is_tilted_cardinal_neighbor(pos_a: Vector3, pos_b: Vector3,
+		base_orientation: int, snap: float) -> bool:
+	var axes: Dictionary = PlaneCoordinateMapper.PLANE_AXES[base_orientation]
+	var dh: float = 0.0
+	var dv: float = 0.0
+	match axes["h_axis"]:
+		"x": dh = absf(pos_b.x - pos_a.x)
+		"y": dh = absf(pos_b.y - pos_a.y)
+		"z": dh = absf(pos_b.z - pos_a.z)
+	match axes["v_axis"]:
+		"x": dv = absf(pos_b.x - pos_a.x)
+		"y": dv = absf(pos_b.y - pos_a.y)
+		"z": dv = absf(pos_b.z - pos_a.z)
+	# Thresholds scale with grid_snap_size
+	var step_lo: float = snap * 0.7
+	var step_hi: float = snap * 1.3
+	var zero_hi: float = snap * 0.3
+	var h_is_step: bool = dh > step_lo and dh < step_hi
+	var v_is_step: bool = dv > step_lo and dv < step_hi
+	var h_is_zero: bool = dh < zero_hi
+	var v_is_zero: bool = dv < zero_hi
+	if not ((h_is_step and v_is_zero) or (h_is_zero and v_is_step)):
+		return false
+	# Lateral: dist²=snap². Ramp (45°): dist²=2*snap². Allow 2.5*snap² for tolerance.
+	return pos_a.distance_squared_to(pos_b) < snap * snap * 2.5
+
+
+static func _ray_quad_intersect(ray_origin: Vector3, ray_dir: Vector3,
+						 tile_transform: Transform3D, grid_size: float) -> float:
+	var half: float = grid_size / 2.0
+	var v0: Vector3 = tile_transform * Vector3(-half, 0.0, -half)
+	var v1: Vector3 = tile_transform * Vector3( half, 0.0, -half)
+	var v2: Vector3 = tile_transform * Vector3( half, 0.0,  half)
+	var v3: Vector3 = tile_transform * Vector3(-half, 0.0,  half)
+	var t1: float = _ray_triangle_intersect(ray_origin, ray_dir, v0, v1, v2)
+	if t1 > 0.0:
+		return t1
+	return _ray_triangle_intersect(ray_origin, ray_dir, v0, v2, v3)
+
+static func _ray_triangle_intersect(ray_origin: Vector3, ray_dir: Vector3,
+							  v0: Vector3, v1: Vector3, v2: Vector3) -> float:
+	var edge1: Vector3 = v1 - v0
+	var edge2: Vector3 = v2 - v0
+	var h: Vector3 = ray_dir.cross(edge2)
+	var a: float = edge1.dot(h)
+	if absf(a) < 0.00001:
+		return -1.0
+	var f: float = 1.0 / a
+	var s: Vector3 = ray_origin - v0
+	var u: float = f * s.dot(h)
+	if u < 0.0 or u > 1.0:
+		return -1.0
+	var q: Vector3 = s.cross(edge1)
+	var v: float = f * ray_dir.dot(q)
+	if v < 0.0 or u + v > 1.0:
+		return -1.0
+	return f * edge2.dot(q)
+
+static func _build_tile_transform(tile_info: PlacedTileInfo, grid_size: float) -> Transform3D:
+	if tile_info.has_custom_transform:
+		return tile_info.custom_transform
+	return GlobalUtil.build_tile_transform(
+		tile_info.grid_position, tile_info.orientation,
+		tile_info.mesh_rotation, grid_size,
+		tile_info.is_face_flipped, tile_info.spin_angle_rad,
+		tile_info.tilt_angle_rad, tile_info.diagonal_scale,
+		tile_info.tilt_offset_factor, tile_info.mesh_mode,
+		tile_info.depth_scale,
+		tile_info.depth_growth_mode == GlobalConstants.DepthGrowthMode.INWARD)

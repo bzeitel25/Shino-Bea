@@ -1,0 +1,38 @@
+[gd_scene load_steps=3 format=3 uid="uid://bea_kunai"]
+
+[ext_resource type="Script" path="res://scripts/Kunai.gd" id="1_kunai"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_kunai"]
+size = Vector2(4, 12)
+
+[node name="Kunai" type="Area2D"]
+collision_layer = 8
+collision_mask = 5
+script = ExtResource("1_kunai")
+
+; ── Blade body (silver, thin, longer than wide — points UP in local frame) ──
+[node name="Sprite" type="ColorRect" parent="."]
+offset_left = -2.0
+offset_top = -7.0
+offset_right = 2.0
+offset_bottom = 4.0
+color = Color(0.78, 0.82, 0.88, 1.0)
+
+; ── Sharper bright tip (front of the blade) ──
+[node name="Tip" type="ColorRect" parent="."]
+offset_left = -1.0
+offset_top = -8.0
+offset_right = 1.0
+offset_bottom = -5.0
+color = Color(0.95, 0.97, 1.0, 1.0)
+
+; ── Dark hilt wrap at the back of the blade ──
+[node name="Hilt" type="ColorRect" parent="."]
+offset_left = -2.5
+offset_top = 3.0
+offset_right = 2.5
+offset_bottom = 6.0
+color = Color(0.18, 0.18, 0.22, 1.0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_kunai")
