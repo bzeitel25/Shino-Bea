@@ -26,12 +26,13 @@ const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glid
 # Bea is purple (placeholder art).
 # ============================================================
 
-@export var max_hp: int = 80
 @export var move_speed: float = 230.0
 
+# max_hp moved to HeroBase (Batch 5; @export). Bea sets max_hp = 80 early in
+# _ready (base default is Shino's 100).
 # current_hp, current_chi moved to HeroBase (Batch 3); current_hp reset to
 # max_hp at _ready top.
-const MAX_CHI: int = 100
+# MAX_CHI moved to HeroBase (Batch 5).
 
 const CHI_PER_DAMAGE_DEALT: float = 0.5
 const CHI_PER_DAMAGE_TAKEN: float = 1.5
@@ -88,8 +89,7 @@ var _ai_unstick_fails: int = 0          # consecutive failed bursts → peel fur
 # --- Baked Apple finisher HoT (Run 27 — mirrors Player.gd _start_baked_apple_hot) ---
 var _baked_apple_hot_remaining: float = 0.0
 var _baked_apple_hot_accum:     float = 0.0
-# --- apply_runstate_modifiers HP-delta tracking (mirrors Player.gd) ---
-var _last_applied_max_hp: int = 0
+# _last_applied_max_hp moved to HeroBase (Batch 5).
 # --- Evergreen Step dash-heal state (mirrors Player.gd) ---
 var _evergreen_step_active: bool = false
 var _evergreen_step_cd_timer: float = 0.0
@@ -109,7 +109,7 @@ var dash_timer: float = 0.0
 var _dash_ghost_cd: float = 0.0          # afterimage spawn cooldown
 const DASH_GHOST_INTERVAL: float = 0.02  # spawn a ghost every ~20ms during dash
 # dash_cd_timer moved to HeroBase (Batch 4)
-var dash_charges: int = 1   # Extra Banana grants +1; refills per DASH_INTERNAL_CD
+# dash_charges moved to HeroBase (Batch 5)
 var dash_direction: Vector2 = Vector2.ZERO
 
 # --- Run 150 — Tuber Burrow (Potato B, Bruno fix 3): Bea parity with Player.gd.
@@ -414,12 +414,9 @@ var _shino: Node = null   # Shino reference — found after one frame in _ready
 # ── Frost (Popsicle Pelican) ────────────────────────────────────────────────
 # Stacking movement slow (mirrors Player.gd). Applied by the pelican's popsicle
 # hit / icy patch; decays one stack at a time.
-const FROST_MAX_STACKS: int       = 5
 # FROST_SLOW_PER_STACK moved to HeroBase (Batch 2).
-const FROST_STACK_DECAY: float    = 1.4
-const FROST_OUTLINE_HOLD: float   = 1.2
-# frost_stacks moved to HeroBase (Batch 2).
-var _frost_decay_t: float = 0.0
+# FROST_MAX_STACKS / FROST_STACK_DECAY / FROST_OUTLINE_HOLD / _frost_decay_t
+# moved to HeroBase (Batch 5). frost_stacks moved to HeroBase (Batch 2).
 
 @onready var sprite: ColorRect    = get_node_or_null("Sprite")
 @onready var swap_label: Label    = get_node_or_null("NameLabel")
@@ -480,6 +477,7 @@ func _bump_combo() -> void:
 
 func _ready() -> void:
 	hero_id = "bea"   # HeroBase identity — per-hero RunState gating key
+	max_hp = 80       # Batch 5 — max_hp is now a HeroBase @export (base default 100 = Shino)
 	current_hp = max_hp
 	player_controlled = false   # Batch 4 — Bea spawns as the AI partner (base default is true)
 	# Batch 3 — Bea's external-heal particle FX (base default is Shino's).
@@ -2345,19 +2343,7 @@ func _overshield_absorb_duo_procs() -> void:
 
 # Per-hit Bash roll — called for melee enemy hits from katana / naginata strikes.
 # Returns true on proc (caller adds RunState.bash_bonus_damage to outgoing damage).
-func _try_apply_coconut_bash(target: Node) -> bool:
-	if RunState.bash_on_hit_chance <= 0.0:
-		return false
-	if randf() >= RunState.bash_on_hit_chance:
-		return false
-	var target_status: Variant = target.get("status") if target.has_method("get") else null
-	if target_status != null and target_status.has_method("apply"):
-		target_status.apply("bash", 1.0)
-		FX.play_sound("bash_proc", 0.8)
-		FX.spawn_hit_particles(target.global_position, Color(0.80, 0.55, 0.20, 1.0), 6)
-	return true
-
-
+# _try_apply_coconut_bash moved to HeroBase (Batch 5).
 # _try_apply_shell_breaker moved to HeroBase (Batch 3).
 
 
@@ -4781,25 +4767,7 @@ func _spawn_kunai(dir: Vector2, forward_extra: float) -> void:
 # Run 102 — swamp poison entry point (called by TrapZone poison pools). Applies
 # the 3s purple-outline poison; re-calling refreshes the timer (never stacks).
 # The HeroHitFX node ticks the low trap damage once a second on its own.
-func apply_trap_poison() -> void:
-	if state == State.DOWNED:
-		return
-	if is_invulnerable:
-		return
-	if _hitfx:
-		_hitfx.start_poison()
-
-
-# ── Frost (Popsicle Pelican) — mirrors Player.gd ────────────────────────────
-func add_frost_stack(n: int = 1) -> void:
-	if state == State.DOWNED or is_invulnerable:
-		return
-	frost_stacks = clampi(frost_stacks + n, 0, FROST_MAX_STACKS)
-	_frost_decay_t = FROST_STACK_DECAY
-	if _hitfx:
-		_hitfx.start_frost(FROST_OUTLINE_HOLD, float(frost_stacks) / float(FROST_MAX_STACKS))
-
-
+# apply_trap_poison / add_frost_stack moved to HeroBase (Batch 5).
 # _frost_move_mult moved to HeroBase (Batch 2).
 
 
@@ -4928,23 +4896,7 @@ func _tick_layered_defense(delta: float) -> void:
 			es.apply("poison", dur, 1)
 
 
-# Run 46 — Dragon Chi (Sensei Z): passive Chi regen. Mirror of Player.gd.
-var _sensei_chi_accum: float = 0.0
-
-func _tick_sensei_chi_regen(delta: float) -> void:
-	var rate: float = RunState.get_sensei_chi_regen_rate()
-	if rate <= 0.0 or current_hp <= 0:
-		return
-	var cap: int = get_effective_max_chi()
-	if current_chi >= cap:
-		_sensei_chi_accum = 0.0
-		return
-	_sensei_chi_accum += rate * delta
-	if _sensei_chi_accum >= 1.0:
-		var whole: int = int(_sensei_chi_accum)
-		_sensei_chi_accum -= float(whole)
-		current_chi = min(cap, current_chi + whole)
-		emit_signal("bea_chi_changed", current_chi, cap)
+# _tick_sensei_chi_regen (+ _sensei_chi_accum) moved to HeroBase (Batch 5).
 
 
 func _tick_hydration(delta: float) -> void:
@@ -5188,23 +5140,7 @@ func _tick_hot_step_bea(delta: float) -> void:
 	FX.spawn_hit_particles(global_position, Color(1.00, 0.50, 0.15, 0.85), 3)
 
 
-func apply_runstate_modifiers() -> void:
-	# Re-apply boon-driven max-HP scaling, healing the delta (mirrors Player.gd).
-	var new_max: int = get_effective_max_hp()
-	var prev_max: int = _last_applied_max_hp if _last_applied_max_hp > 0 else max_hp
-	var delta: int = new_max - prev_max
-	if delta > 0:
-		current_hp = min(new_max, current_hp + delta)
-	current_hp = clamp(current_hp, 0, new_max)
-	_last_applied_max_hp = new_max
-	emit_signal("bea_hp_changed", current_hp, new_max)
-	emit_signal("bea_chi_changed", current_chi, MAX_CHI)
-	# Refresh dash charges if Extra Banana was just picked (mirrors Player.gd).
-	var new_max_ch: int = _get_max_dash_charges()
-	if dash_charges > new_max_ch:
-		dash_charges = new_max_ch
-	elif dash_charges < new_max_ch and dash_cd_timer <= 0.0:
-		dash_charges = new_max_ch
+# apply_runstate_modifiers moved to HeroBase (Batch 5).
 
 
 func _apply_bea_carry_state() -> void:
@@ -5215,18 +5151,7 @@ func _apply_bea_carry_state() -> void:
 		current_chi = min(RunState.bea_carry_chi, MAX_CHI)
 
 
-func get_effective_max_hp() -> int:
-	# Per-character Orchard Bloom bonus (only Bea's picks count for Bea).
-	# Pie bonus is shared (both ninjas get it from apply_pie).
-	var total_pct: float = RunState.get_orchard_bloom_pct_for("bea") + RunState.get_apple_pie_max_hp_pct()
-	total_pct += RunState.sensei_hp_pct   # Run 46 — Vital Core (Sensei Z), now wired
-	var raw: float = float(max_hp) * (1.0 + total_pct)
-	raw *= RunState.get_iron_core_hp_mult()
-	# Run 27f — Poison Apple corrupt: max HP capped at 50.
-	if RunState.bea_has("corrupt_apple"):
-		return mini(50, int(round(raw)) + _candy_apple_bonus)
-	# Run 27d — Candy Apple duo: flat temp max HP bonus (cap +10).
-	return int(round(raw)) + _candy_apple_bonus
+# get_effective_max_hp moved to HeroBase (Batch 5).
 
 
 # ---- DEPRECATED Run 13 — `_try_consume_dd_charge` removed ----
@@ -5238,21 +5163,7 @@ func _try_consume_dd_charge() -> bool:
 	return false
 
 
-func _tick_dd_hot(delta: float) -> void:
-	if _dd_hot_remaining <= 0.0 or _dd_hot_pct_per_sec <= 0.0:
-		return
-	_dd_hot_remaining -= delta
-	var max_hp_eff: int = get_effective_max_hp()
-	_dd_hot_accum += float(max_hp_eff) * _dd_hot_pct_per_sec * delta
-	if _dd_hot_accum >= 1.0:
-		var whole: int = int(floor(_dd_hot_accum))
-		_dd_hot_accum -= float(whole)
-		current_hp = min(max_hp_eff, current_hp + whole)
-		emit_signal("bea_hp_changed", current_hp, max_hp_eff)
-	if _dd_hot_remaining <= 0.0:
-		_dd_hot_remaining = 0.0
-		_dd_hot_accum = 0.0
-		_dd_hot_pct_per_sec = 0.0
+# _tick_dd_hot moved to HeroBase (Batch 5).
 
 
 # ---------------------------------------------------------------------------
@@ -5286,20 +5197,7 @@ func _tick_baked_apple_hot(delta: float) -> void:
 			emit_signal("bea_hp_changed", current_hp, max_hp_eff)
 
 
-# Sweet Dreams room-clear heal — per-character per §8.1 spec.
-# World.gd calls this on each wave clear. Returns heal applied (0 if no-op).
-func apply_sweet_dreams_heal() -> int:
-	var pct: float = RunState.get_sweet_dreams_heal_pct("bea")
-	if pct <= 0.0:
-		return 0
-	if current_hp <= 0:
-		return 0   # downed Bea doesn't auto-revive from room clears (§8.5.2)
-	var max_hp_eff: int = get_effective_max_hp()
-	var heal: int = max(1, int(round(max_hp_eff * pct)))
-	var before: int = current_hp
-	current_hp = min(max_hp_eff, current_hp + heal)
-	emit_signal("bea_hp_changed", current_hp, max_hp_eff)
-	return current_hp - before
+# apply_sweet_dreams_heal moved to HeroBase (Batch 5).
 
 
 # ---------------------------------------------------------------------------
@@ -5511,8 +5409,7 @@ func _bea_spawn_stomp_earth_line(origin: Vector2, length: float, is_spike: bool)
 # -------------------------------------------------------
 # Utility helpers (mirrors of Player.gd equivalents)
 # -------------------------------------------------------
-func get_effective_max_chi() -> int:
-	return MAX_CHI + RunState.max_chi_bonus
+# get_effective_max_chi moved to HeroBase (Batch 5).
 
 
 func _count_nearby_enemies(radius: float) -> int:

@@ -33,14 +33,9 @@ const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glid
 
 # --- Tunable stats (placeholder — balance in playtest) ---
 @export var move_speed: float = 220.0
-@export var max_hp: int = 100
+# max_hp moved to HeroBase (Batch 5; @export, base default 100 = Shino).
 # current_hp moved to HeroBase (Batch 3); reset to max_hp at _ready top.
-
-# Tracks the effective max HP at the last apply_runstate_modifiers() call so
-# subsequent boon picks heal by the DELTA, not by the whole bonus. Without
-# this, picking Orchard Bloom twice (or +HP boons after partial damage) would
-# over-heal because we were comparing against the unchanging base max_hp.
-var _last_applied_max_hp: int = -1
+# _last_applied_max_hp moved to HeroBase (Batch 5).
 
 # --- Dash (GDD §8.2.-1: global dash rule) ---
 # Tuned: shorter distance (~2/3 of original 126px = ~84px) but higher
@@ -62,7 +57,7 @@ var _golden_carrot_armed: bool = false # Run 131 — a dash arms the next combo 
 var _slapstick_bananas: Array = []     # Run 130 — live banana drops [{pos, until, node}]
 
 # --- Dash charges (Extra Banana: hold 2 at once; Slapstick L2: hold 3) ---
-var dash_charges: int = 1   # current available dashes (consumed on use, refilled by CD)
+# dash_charges moved to HeroBase (Batch 5).
 
 # --- Tuber Burrow (Potato B — GDD §8.8) ---
 # Tap B = normal dash. Hold B = after dash ends, if button still held → burrow.
@@ -82,7 +77,7 @@ var _vine_lash_window: float = 0.0
 var _burrow_mound: Node2D   = null            # placeholder dirt-mound visual node
 
 # --- Chi (GDD §8.3.2 — universal Chi, both characters share gain rules) ---
-const MAX_CHI: int = 100
+# MAX_CHI moved to HeroBase (Batch 5).
 # current_chi moved to HeroBase (Batch 3).
 const CHI_PER_DAMAGE_DEALT: float = 0.5    # per point of damage dealt
 const CHI_PER_DAMAGE_TAKEN: float = 1.5    # per point of damage taken (higher to reward aggression)
@@ -430,12 +425,9 @@ var _was_ult_frozen: bool = false      # Run 151 — tracks partner ult freeze f
 # ── Frost (Popsicle Pelican) ────────────────────────────────────────────────
 # Stacking movement slow. Each stack shaves FROST_SLOW_PER_STACK off move speed;
 # stacks decay one at a time. Applied by the pelican's popsicle hit / icy patch.
-const FROST_MAX_STACKS: int       = 5
 # FROST_SLOW_PER_STACK moved to HeroBase (Batch 2).
-const FROST_STACK_DECAY: float    = 1.4    # seconds before one stack melts off
-const FROST_OUTLINE_HOLD: float   = 1.2    # icy outline refresh window
-# frost_stacks moved to HeroBase (Batch 2).
-var _frost_decay_t: float = 0.0
+# FROST_MAX_STACKS / FROST_STACK_DECAY / FROST_OUTLINE_HOLD / _frost_decay_t
+# moved to HeroBase (Batch 5). frost_stacks moved to HeroBase (Batch 2).
 
 # Last horizontal direction — persists on idle so sprite faces correctly while standing.
 var _last_h_dir: int = 1   # +1 = right, -1 = left
@@ -2860,22 +2852,7 @@ func _apply_uppercut_knockup(body: Node) -> void:
 		lifted = true
 
 
-func _try_apply_coconut_bash(target: Node) -> bool:
-	# Coconut Bash — chance per melee hit to apply Bash status (1s stun)
-	# and grant the caller flat bonus damage. Target must have a status component.
-	if RunState.bash_on_hit_chance <= 0.0:
-		return false
-	if randf() >= RunState.bash_on_hit_chance:
-		return false
-	# Apply Bash to the enemy's status component if available. Duck-type via .get().
-	var target_status: Variant = target.get("status") if target.has_method("get") else null
-	if target_status != null and target_status.has_method("apply"):
-		target_status.apply("bash", 1.0)
-		FX.play_sound("bash_proc", 0.8)
-		FX.spawn_hit_particles(target.global_position, Color(0.80, 0.55, 0.20, 1.0), 6)
-	return true
-
-
+# _try_apply_coconut_bash moved to HeroBase (Batch 5).
 # _try_apply_shell_breaker moved to HeroBase (Batch 3).
 
 
@@ -4349,28 +4326,7 @@ func _spawn_finisher_impact(pos: Vector2, is_uppercut: bool) -> void:
 # Run 102 — swamp poison entry point (called by TrapZone poison pools). Applies
 # the 3s purple-outline poison; re-calling refreshes the timer (never stacks).
 # The HeroHitFX node ticks the low trap damage once a second on its own.
-func apply_trap_poison() -> void:
-	if state == State.DOWNED:
-		return
-	if is_invulnerable:
-		return
-	if _hitfx:
-		_hitfx.start_poison()
-
-
-# ── Frost (Popsicle Pelican) ────────────────────────────────────────────────
-# Add `n` frost stacks (capped), refreshing the decay timer + icy outline. A
-# downed / i-framed hero is untouched. Frost only slows — no damage.
-func add_frost_stack(n: int = 1) -> void:
-	if state == State.DOWNED or is_invulnerable:
-		return
-	frost_stacks = clampi(frost_stacks + n, 0, FROST_MAX_STACKS)
-	_frost_decay_t = FROST_STACK_DECAY
-	if _hitfx:
-		_hitfx.start_frost(FROST_OUTLINE_HOLD, float(frost_stacks) / float(FROST_MAX_STACKS))
-
-
-# Movement multiplier from the current frost stacks (1.0 = none).
+# apply_trap_poison / add_frost_stack moved to HeroBase (Batch 5).
 # _frost_move_mult moved to HeroBase (Batch 2).
 
 
@@ -4463,39 +4419,7 @@ func _reload_arena1() -> void:
 # -------------------------------------------------------
 
 
-func _tick_dd_hot(delta: float) -> void:
-	if _dd_hot_remaining <= 0.0 or _dd_hot_pct_per_sec <= 0.0:
-		return
-	_dd_hot_remaining -= delta
-	var max_hp_eff: int = get_effective_max_hp()
-	# Accumulate fractional HP across frames so a 3%/s tick on a 100-HP cap still
-	# resolves to clean integer applies every frame.
-	_dd_hot_accum += float(max_hp_eff) * _dd_hot_pct_per_sec * delta
-	if _dd_hot_accum >= 1.0:
-		var whole: int = int(floor(_dd_hot_accum))
-		_dd_hot_accum -= float(whole)
-		current_hp = min(max_hp_eff, current_hp + whole)
-		emit_signal("hp_changed", current_hp, max_hp_eff)
-	if _dd_hot_remaining <= 0.0:
-		_dd_hot_remaining = 0.0
-		_dd_hot_accum = 0.0
-		_dd_hot_pct_per_sec = 0.0
-
-
-# Called by World.gd when a wave is cleared. Heals Sweet Dreams's flat % of
-# max HP if the boon is taken. Returns the heal amount (0 if no-op).
-func apply_sweet_dreams_heal() -> int:
-	var pct: float = RunState.get_sweet_dreams_heal_pct("shino")
-	if pct <= 0.0:
-		return 0
-	if current_hp <= 0:
-		return 0   # Down — don't auto-heal corpses
-	var max_hp_eff: int = get_effective_max_hp()
-	var heal: int = max(1, int(round(max_hp_eff * pct)))
-	var before: int = current_hp
-	current_hp = min(max_hp_eff, current_hp + heal)
-	emit_signal("hp_changed", current_hp, max_hp_eff)
-	return current_hp - before
+# _tick_dd_hot / apply_sweet_dreams_heal moved to HeroBase (Batch 5).
 
 
 # -------------------------------------------------------
@@ -4987,49 +4911,9 @@ func get_facing() -> Vector2:
 # -------------------------------------------------------
 # RunState integration — boons + carry-over state
 # -------------------------------------------------------
-func get_effective_max_hp() -> int:
-	# Per-character Orchard Bloom bonus (only Shino's picks count for Shino).
-	# Pie bonus is shared (both ninjas get it). Iron Core is a duo boon —
-	# it remains global.
-	var total_pct: float = RunState.get_orchard_bloom_pct_for("shino") + RunState.get_apple_pie_max_hp_pct()
-	total_pct += RunState.sensei_hp_pct   # Run 46 — Vital Core (Sensei Z), now wired
-	var raw: float = float(max_hp) * (1.0 + total_pct)
-	raw *= RunState.get_iron_core_hp_mult()
-	# Run 27f — Poison Apple corrupt: max HP capped at 50 (hits-remaining counter).
-	if RunState.shino_has("corrupt_apple"):
-		return mini(50, int(round(raw)) + _candy_apple_bonus)
-	# Run 27d — Candy Apple duo: flat temp max HP bonus (cap +10).
-	return int(round(raw)) + _candy_apple_bonus
-
-
-func get_effective_max_chi() -> int:
-	return MAX_CHI + RunState.max_chi_bonus
-
-
-# get_current_hp / get_current_chi moved to HeroBase (Batch 4)
-
-
-# Apply boon-driven stat changes that need re-application:
-#   - Max HP scaling: heals by the DELTA since the last apply (so each pick
-#     of Orchard Bloom feels +20% rewarding instead of compounding into a free heal).
-#   - Move speed: nothing to do here; _handle_movement reads RunState directly.
-#   - Max Chi: nothing to do here; on the next tick the HUD will see new cap.
-func apply_runstate_modifiers() -> void:
-	var new_max_hp: int = get_effective_max_hp()
-	var prev_max_hp: int = _last_applied_max_hp if _last_applied_max_hp > 0 else max_hp
-	var delta: int = new_max_hp - prev_max_hp
-	if delta > 0:
-		current_hp = min(new_max_hp, current_hp + delta)
-	current_hp = clamp(current_hp, 0, new_max_hp)
-	_last_applied_max_hp = new_max_hp
-	emit_signal("hp_changed", current_hp, new_max_hp)
-	emit_signal("chi_changed", current_chi, get_effective_max_chi())
-	# Refresh dash charges in case Extra Banana was just picked (increases max).
-	var new_max_ch: int = _get_max_dash_charges()
-	if dash_charges > new_max_ch:
-		dash_charges = new_max_ch
-	elif dash_charges < new_max_ch and dash_cd_timer <= 0.0:
-		dash_charges = new_max_ch   # fill to new max when not mid-CD recharge
+# get_effective_max_hp / get_effective_max_chi moved to HeroBase (Batch 5).
+# get_current_hp / get_current_chi moved to HeroBase (Batch 4).
+# apply_runstate_modifiers moved to HeroBase (Batch 5).
 
 
 func _apply_carry_state() -> void:
@@ -6047,24 +5931,7 @@ func _tick_layered_defense(delta: float) -> void:
 # -------------------------------------------------------
 # Watermelon Hydration — Chi/sec in combat, ramps after 8s sustained (Run 26)
 # -------------------------------------------------------
-# Run 46 — Dragon Chi (Sensei Z): passive Chi regen. Fractional Chi accumulates
-# in _sensei_chi_accum; whole points are banked into current_chi.
-var _sensei_chi_accum: float = 0.0
-
-func _tick_sensei_chi_regen(delta: float) -> void:
-	var rate: float = RunState.get_sensei_chi_regen_rate()
-	if rate <= 0.0 or current_hp <= 0:
-		return
-	var cap: int = get_effective_max_chi()
-	if current_chi >= cap:
-		_sensei_chi_accum = 0.0
-		return
-	_sensei_chi_accum += rate * delta
-	if _sensei_chi_accum >= 1.0:
-		var whole: int = int(_sensei_chi_accum)
-		_sensei_chi_accum -= float(whole)
-		current_chi = min(cap, current_chi + whole)
-		emit_signal("chi_changed", current_chi, cap)
+# _tick_sensei_chi_regen (+ _sensei_chi_accum) moved to HeroBase (Batch 5).
 
 
 func _tick_hydration(delta: float) -> void:
