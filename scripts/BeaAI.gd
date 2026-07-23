@@ -2019,6 +2019,11 @@ func _spawn_vine_visual(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
 # vetoes Bash while charging.
 # -------------------------------------------------------
 func can_receive_status(id: String) -> bool:
+	# Hulk Smash: full super-armor during any charge or release state — Batch 0
+	# ROT-5 parity with Player.gd, mapped to Bea's charge/release states.
+	if RunState.bea_has("hulk_smash") and id in ["bash", "frozen", "root", "stagger", "slippery", "greased"]:
+		if state in [State.BEA_CHARGING, State.BEA_CHARGED, State.BEA_WHIRLING, State.BEA_DIVING, State.BEA_FLURRYING]:
+			return false
 	# Run 27b — Heavy Stance: stagger immunity while Ingrained (1.5s+ still).
 	if RunState.bea_has("heavy_stance") and _ingrained_time >= RunState.INGRAINED_THRESHOLD and id in ["stagger", "bash"]:
 		return false
@@ -2141,6 +2146,10 @@ func heal_external(amount: int) -> void:
 	amount = max(1, int(round(float(amount) * RunState.get_heal_mult("bea")))) if amount > 0 else amount
 	if amount <= 0:
 		return
+	# Batch 0 ROT-3 — never heal a downed/dead Bea outside the revive pipeline
+	# (parity with Player.gd "Safe for downed state" guard).
+	if current_hp <= 0:
+		return
 	current_hp = min(get_effective_max_hp(), current_hp + amount)
 	emit_signal("bea_hp_changed", current_hp, get_effective_max_hp())
 	FX.spawn_hit_particles(global_position, Color(0.90, 0.60, 0.20, 1.0), 4)
@@ -2159,7 +2168,9 @@ func grant_overshield_external(amount: int) -> void:
 	if RunState.is_duo_active("apple_coconut") and current_hp >= get_effective_max_hp() \
 	and _candy_apple_bonus < 10:
 		_candy_apple_bonus += 1
-		emit_signal("hp_changed", current_hp, get_effective_max_hp())
+		# Batch 0 ROT-2 — was emit_signal("hp_changed", …): a signal Bea doesn't
+		# declare (runtime no-op; HUD never saw the temp-HP bump).
+		emit_signal("bea_hp_changed", current_hp, get_effective_max_hp())
 		FX.spawn_hit_particles(global_position, Color(0.95, 0.45, 0.45, 0.9), 5)
 	var new_total: int = min(cap, overshield_charges + amount)
 	if new_total > overshield_charges:
@@ -4873,10 +4884,15 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 		FX.spawn_burst_particles(global_position, Color(0.90, 0.75, 0.40, 0.95), 16)
 	# Apply knockback impulse (decayed in _physics_process)
 	_hit_knockback_vel = (_hit_knockback_vel + knockback_vector).limit_length(400.0)
-	# Apply boon-driven incoming damage reduction (Tough Shell, etc.)
+	# Apply boon-driven incoming damage reduction (Tough Shell, etc.) and
+	# status-driven amplification (Vulnerable stacks) — Batch 0 ROT-1 parity
+	# with Player.gd (Bea had a live StatusComponent but never applied it).
+	var status_mult: float = 1.0
+	if status:
+		status_mult = status.get_damage_taken_mult()
 	# Green Rage <25% HP tier: -25% damage taken (Combat_Boons §8.3 passive 1).
 	var gr_dr: float = RunState.get_green_rage_dr(float(current_hp) / max(1.0, float(get_effective_max_hp())), "bea")
-	var adjusted: int = int(round(amount * RunState.get_damage_taken_mult_for("bea") * gr_dr))
+	var adjusted: int = int(round(amount * RunState.get_damage_taken_mult_for("bea") * status_mult * gr_dr))
 	if adjusted < 1 and amount > 0:
 		adjusted = 1
 	# Run 139 — Chip-Proof (Bea parity): no single hit removes >15% max HP.
@@ -4901,6 +4917,7 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 			if _se.has_method("take_damage") and global_position.distance_to(_se.global_position) < 150.0:
 				_se.take_damage(_bea_spike, (_se.global_position - global_position).normalized())
 				FX.spawn_hit_particles(_se.global_position, Color(0.65, 0.45, 0.25, 0.9), 4)
+				break   # one nearest enemy — Batch 0 ROT-4 parity with Player.gd
 	# Run 62 — Beast Mode (Tier 5) HP floor. When Bea is the tier-5 AI
 	# partner (not player-controlled), clamp HP at the floor: the hit still
 	# lands (knockback/chi above) but net HP loss stops here, so she never
@@ -4932,11 +4949,11 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 				if _sr_status != null and _sr_status.has_method("apply"):
 					_sr_status.apply("bash", 1.0)
 				FX.spawn_hit_particles(_sr_best.global_position, Color(0.95, 0.85, 0.20, 1.0), 8)
-	# Chi gain on taking damage (§8.3.2 — rewards aggressive play)
-	var chi_cap: int = MAX_CHI
-	current_chi = min(chi_cap, current_chi + int(CHI_PER_DAMAGE_TAKEN * adjusted))
+	# Chi gain on taking damage (§8.3.2) — Batch 0 ROT-6/7 parity: route through
+	# _add_chi so Cold Waters halving + Poison Apple conversion apply, and the
+	# cap honors get_effective_max_chi(). (_add_chi emits bea_chi_changed.)
+	_add_chi(int(CHI_PER_DAMAGE_TAKEN * adjusted))
 	emit_signal("bea_hp_changed", current_hp, get_effective_max_hp())
-	emit_signal("bea_chi_changed", current_chi, chi_cap)
 	# Phase 7 — Bea-hit shake + purple particles + sound stub.
 	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_SHORT)
 	FX.spawn_hit_particles(global_position, Color(0.85, 0.45, 0.95, 1.0), 8)
@@ -5224,8 +5241,9 @@ func _add_chi(amount: int) -> void:
 		var _chi_mult: float = 0.5 if RunState.bea_has("corrupt_watermelon") else 1.0
 		_chi_mult *= (1.0 + RunState.get_poison_apple_conversion_pct("bea"))
 		amount = max(1, int(round(float(amount) * _chi_mult)))
-	current_chi = min(MAX_CHI, current_chi + amount)
-	emit_signal("bea_chi_changed", current_chi, MAX_CHI)
+	# Batch 0 ROT-7 — cap honors max-chi boons (was raw MAX_CHI).
+	current_chi = min(get_effective_max_chi(), current_chi + amount)
+	emit_signal("bea_chi_changed", current_chi, get_effective_max_chi())
 
 
 # Run 150 — parity shim (Bruno fix 1): Kunai.gd and other projectiles route
