@@ -318,3 +318,601 @@ func _try_apply_shell_breaker(target: Node) -> bool:
 		FX.spawn_hit_particles(target.global_position, Color(0.95, 0.30, 0.85, 1.0), 8)
 		return true
 	return false
+
+
+# ============================================================
+# Batch 4 extraction (2026-07-23) — health / downed / revive / DD cluster.
+# The contract-critical batch. Per-hero differences resolved via hero_id, the
+# child-overridable state predicates/setters below, per-hero FX/config vars set
+# in each child's _ready, and a few kit/AI method stubs (overridden per child).
+#
+# HARD LOCKS preserved byte-for-byte:
+#   - A downed body takes ZERO damage (guarded twice: state + is_invulnerable).
+#   - `last_damager` kill-attribution is untouched (set at hit sites, not here).
+# ============================================================
+
+# --- Combat/dash/i-frame state (declarations lifted from both children) ------
+var dash_cd_timer: float = 0.0
+var iframe_timer: float = 0.0
+var is_invulnerable: bool = false
+var _drupe_invuln_timer: float = 0.0   # Run 128 — Drupe Guard post-hit invuln window
+var _ghost_stealthed: bool = false     # Run 130 — Ghost Pepper vanish state
+var _hit_knockback_vel: Vector2 = Vector2.ZERO
+var status: StatusComponent = null     # Bash/Vulnerable/etc. — created in each child's _ready
+# body_anim resolves the "Body" child (BodyAnimator, Run 9) on both hero scenes.
+@onready var body_anim: Node = get_node_or_null("Body")
+var _hitfx: HeroHitFX = null           # HeroHitFX overlay — created in each child's _ready
+# Control assignment. Base default = player-controlled (Shino). Bea flips this to
+# false in her _ready (she spawns as the AI partner). Read only after _ready.
+var player_controlled: bool = true
+
+# --- Downed / revive state (Run 13 rework — shared mirrors) ------------------
+const REVIVE_CIRCLE_RADIUS:    float = 90.0    # standing-in-circle slow revive zone
+const REVIVE_CHANNEL_RANGE:    float = 40.0    # touching/adjacent — interact channel range
+const REVIVE_CIRCLE_RATE:      float = 1.0 / 6.0   # full rez over 6s in circle (base rate)
+const REVIVE_CHANNEL_RATE:     float = 1.0 / 3.0   # full rez over 3s on channel (2x speed)
+const REVIVE_AT_HP_PCT:        float = 0.28    # partner rez brings downed back at ~28%
+const REVIVE_IFRAME_ON_GET_UP: float = 0.8     # brief i-frames after rez
+var rez_fill: float = 0.0                       # 0..1; only relevant while DOWNED
+var _channeling_partner: Node = null            # who we're reviving (their downed node)
+var _revive_circle_node: Node2D = null          # ground-ring shown around downed body
+var _rez_bar_bg:         ColorRect = null
+var _rez_bar_fill:       ColorRect = null
+var _interact_prompt:    Label = null           # "Press [E] to revive" prompt
+# DD (Deadly Dream) team-revive HoT accumulator.
+var _dd_hot_pct_per_sec: float = 0.0
+var _dd_hot_remaining:   float = 0.0
+var _dd_hot_accum:       float = 0.0             # fractional HP accumulator between applies
+
+# --- Per-hero FX/config (Shino defaults here; Bea overrides in her _ready) ----
+# take_damage hurt cue.
+var _hurt_fx_color: Color = Color(1.0, 0.25, 0.25, 1.0)
+var _hurt_fx_count: int = 10
+var _hurt_sound: String = "player_hurt"
+# _enter_downed_state cue + dimmed body tint.
+var _downed_modulate: Color = Color(0.45, 0.45, 0.45, 0.85)
+var _downed_fx_color: Color = Color(0.65, 0.10, 0.10, 1.0)
+var _downed_fx_count: int = 14
+var _downed_sound: String = "player_downed"
+var _downed_sound_pitch: float = 1.1
+
+
+# --- Child-overridable state predicates / setters ---------------------------
+# Both hero State enums contain DOWNED and REVIVING, and Bea additionally has a
+# DEAD state + AI_FOLLOW/PLAYER_CONTROLLED control states. Base code cannot name
+# State.X, so all state reads/writes route through these. Base impls are neutral;
+# each child overrides with its own enum.
+func _is_state_downed() -> bool:
+	return false
+
+func _is_state_dead() -> bool:
+	return false   # Shino has no DEAD state; Bea overrides.
+
+func _set_state_downed() -> void:
+	pass
+
+func _set_state_reviving() -> void:
+	pass
+
+# Neutral / resume state after a revive or channel-cancel. Shino → IDLE; Bea →
+# PLAYER_CONTROLLED or AI_FOLLOW depending on who's driving (stuck-after-rez fix).
+func _set_state_neutral() -> void:
+	pass
+
+# _tick_revive_attempt bail-out: the per-hero set of non-cancellable states.
+func _revive_attempt_locked() -> bool:
+	return false
+
+
+# --- Child-overridable kit/AI hooks (real impls live in the children) --------
+# Overshield absorb (Batch-3-skipped kit drift: Adamantium). Real per child.
+func _consume_overshield() -> bool:
+	return false
+
+# Rampart (Potato passive) wall spawn. Shino spawns directly; Bea routes through
+# a "player"-group member (she owns no wall spawner). Each computes its own facing.
+func _spawn_rampart_wall_routed() -> void:
+	pass
+
+# Chi gained from taking damage. Shino applies Cold-Waters/Poison-Apple inline;
+# Bea routes through _add_chi (which applies the same mults). Emits its chi signal.
+func _gain_chi_from_damage_taken(_adjusted: int) -> void:
+	pass
+
+# Per-hero combat-state teardown when entering DOWNED / starting a channel-rez.
+func _cleanup_combat_on_downed() -> void:
+	pass
+
+func _cleanup_combat_on_channel_start() -> void:
+	pass
+
+# AI helpers (real impls slated for a later AI batch; stubbed so the revive
+# functions resolve in base scope — always overridden, base never runs).
+func _count_nearby_enemies(_radius: float) -> int:
+	return 0
+
+func _ai_enemy_attack_imminent(_range: float) -> bool:
+	return false
+
+func _start_dash() -> void:
+	pass
+
+
+# -------------------------------------------------------
+# take_damage — the single damage sink for both heroes (Run 13 downed rework).
+# -------------------------------------------------------
+func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: String = "enemy") -> void:
+	# Bea has a DEAD state Shino lacks; base predicate returns false for Shino.
+	if _is_state_dead():
+		return
+	# A downed body is never a valid target — HARD LOCK (zero damage while downed).
+	# Belt-and-suspenders with is_invulnerable set in _enter_downed_state.
+	if _is_state_downed():
+		return
+	if is_invulnerable:
+		return   # Dash i-frames active
+	# Run 128 — Drupe Guard (Coconut Legendary): active invuln window.
+	if _drupe_invuln_timer > 0.0:
+		return
+	# Run 130 — Ghost Pepper: while vanished, direct enemy hits can't find you
+	# (lava/poison ground hazards still connect per doc).
+	if _ghost_stealthed and source == "enemy":
+		return
+	# Coconut Overshield — absorb the entire hit if a charge is held. Charge
+	# breaks → Nutshell shockwave (if taken). Damage is fully negated.
+	if amount > 0 and _consume_overshield():
+		return
+	# Run 128 — Drupe Guard proc: the triggering hit lands, then 1.5s of full
+	# invulnerability (10s CD, -2s per level — handled in RunState).
+	var _drupe_dur: float = RunState.try_drupe_guard(hero_id)
+	if _drupe_dur > 0.0:
+		_drupe_invuln_timer = _drupe_dur
+		FX.spawn_burst_particles(global_position, Color(0.90, 0.75, 0.40, 0.95), 16)
+	_hit_knockback_vel = (_hit_knockback_vel + knockback_vector).limit_length(400.0)
+	# Boon-driven damage reduction (Tough Shell, etc.) + status amplification
+	# (Vulnerable stacks — Batch 0 ROT-1 gave Bea parity here).
+	var status_mult: float = 1.0
+	if status:
+		status_mult = status.get_damage_taken_mult()
+	# Green Rage <25% HP tier: -25% damage taken (Combat_Boons §8.3 passive 1).
+	var gr_dr: float = RunState.get_green_rage_dr(float(current_hp) / max(1.0, float(get_effective_max_hp())), hero_id)
+	var adjusted: int = int(round(amount * RunState.get_damage_taken_mult_for(hero_id) * status_mult * gr_dr))
+	if adjusted < 1 and amount > 0:
+		adjusted = 1   # never reduce a real hit below 1 dmg
+	# Chip-Proof — no single hit may remove more than 15% max HP.
+	adjusted = RunState.chip_proof_cap(adjusted, get_effective_max_hp(), hero_id)
+	# Run 27f — Poison Apple corrupt: ALL damage = exactly 1 HP per hit.
+	if _hero_has("corrupt_apple"):
+		adjusted = 1
+	# Run 27f — Rampart (Potato passive): 20% chance on damage taken to raise a
+	# rock wall (Shino spawns directly; Bea routes through the wall spawner).
+	if _hero_has("rampart") and randf() < 0.20:
+		_spawn_rampart_wall_routed()
+	# Run 62 — Beast Mode (Tier 5) HP floor. When this hero is the tier-5 AI
+	# partner (not player-controlled), clamp HP at the floor: the hit lands
+	# (knockback/chi above) but net HP loss stops here, so they never down.
+	# Floor is 0 in every other case → normal downable behavior.
+	var _bm_floor: int = RunState.beastmode_hp_floor_value(player_controlled, get_effective_max_hp())
+	current_hp = max(_bm_floor, current_hp - adjusted)
+	# Spineback — 30% chance: retaliatory spike at the nearest enemy only.
+	var spike_dmg: int = RunState.spineback_retaliate(adjusted, hero_id)
+	if spike_dmg > 0:
+		for e in get_tree().get_nodes_in_group("enemy"):
+			if not is_instance_valid(e):
+				continue
+			if e.has_method("take_damage") and global_position.distance_to(e.global_position) < 150.0:
+				e.take_damage(spike_dmg, (e.global_position - global_position).normalized())
+				FX.spawn_hit_particles(e.global_position, Color(0.65, 0.45, 0.25, 0.9), 4)
+				break   # one nearest enemy
+	# Run 128 — Shocking Return (Banana passive): 20% when hit — knock down the
+	# attacker (nearest-enemy proxy). GL mode: zap + ministun instead.
+	if RunState.roll_shocking_return(hero_id):
+		var _sr_best: Node2D = null
+		var _sr_dist: float = 200.0
+		for se in get_tree().get_nodes_in_group("enemy"):
+			if is_instance_valid(se) and se is Node2D:
+				var _sr_d: float = global_position.distance_to(se.global_position)
+				if _sr_d < _sr_dist:
+					_sr_dist = _sr_d
+					_sr_best = se
+		if _sr_best != null:
+			var _sr_status: Variant = _sr_best.get("status") if _sr_best.has_method("get") else null
+			if RunState.greased_lightning_mode:
+				if _sr_best.has_method("take_damage"):
+					_sr_best.take_damage(4, Vector2.ZERO)
+				if _sr_status != null and _sr_status.has_method("apply"):
+					_sr_status.apply("bash", 0.3)
+				FX.spawn_hit_particles(_sr_best.global_position, Color(0.95, 0.90, 0.30, 1.0), 8)
+			else:
+				if _sr_status != null and _sr_status.has_method("apply"):
+					_sr_status.apply("bash", 1.0)
+				FX.spawn_hit_particles(_sr_best.global_position, Color(0.95, 0.85, 0.20, 1.0), 8)
+	# Chi gain on taking damage (§8.3.2) — per-hero path (Shino inline cw_mult /
+	# Bea via _add_chi). Batch 0 ROT-6/7 made these behavior-identical.
+	_gain_chi_from_damage_taken(adjusted)
+	_emit_hp_signal()
+	# Feel — hit shake + per-hero particles + hurt sound.
+	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_SHORT)
+	FX.spawn_hit_particles(global_position, _hurt_fx_color, _hurt_fx_count)
+	FX.play_sound(_hurt_sound)
+	# Run 102 — damage outline: red for direct enemy hits, orange for lava.
+	# (Poison keeps its own held purple outline, applied via apply_trap_poison.)
+	if _hitfx:
+		match source:
+			"lava":
+				_hitfx.flash(HeroHitFX.COLOR_LAVA, 0.25)
+				_hitfx.spawn_lava_embers()
+			"poison":
+				pass   # purple outline handled by the held poison state
+			_:
+				_hitfx.flash(HeroHitFX.COLOR_HIT, 0.22)
+	# Run 9 — procedural hit-recoil animation on the body wireframe.
+	if body_anim and body_anim.has_method("set_anim_state"):
+		body_anim.set_anim_state("hit_recoil")
+	if current_hp <= 0:
+		# Run 13 — individual death enters DOWNED; the partner can revive
+		# (circle/channel). DD only fires when BOTH are down with no rez —
+		# resolved centrally by RunState.resolve_team_down (see _check_team_down_state).
+		_enter_downed_state()
+
+
+# -------------------------------------------------------
+# Downed state + revive system (Run 13 — replaces per-character DD).
+# -------------------------------------------------------
+func is_downed() -> bool:
+	return _is_state_downed()
+
+
+func _enter_downed_state() -> void:
+	if _is_state_downed():
+		return   # defensive — take_damage shouldn't fire on a downed body
+	print("[%s] knocked down — waiting for revive." % hero_id)
+	RunState.notify_downed(hero_id)
+	_set_state_downed()
+	velocity = Vector2.ZERO
+	rez_fill = 0.0
+	# Per-hero combat teardown (attack combo / weapons / charge aim-lines).
+	_cleanup_combat_on_downed()
+	if _hitfx:
+		_hitfx.set_charge(0)   # Run 112 — drop charge aura if downed mid-charge
+	# Permanent i-frames while down (cleared on revive). HARD LOCK: the downed
+	# body can't take damage — only the standing partner is a valid target.
+	is_invulnerable = true
+	iframe_timer = 999.0
+	# Visual: tip the body over via the death pose, dim colors.
+	if body_anim and body_anim.has_method("set_anim_state"):
+		body_anim.set_anim_state("death")
+	modulate = _downed_modulate
+	# Build revive UI (circle + rez bar above body).
+	_build_revive_ui()
+	# Feel cue — softer than full death (it's recoverable).
+	FX.spawn_burst_particles(global_position, _downed_fx_color, _downed_fx_count)
+	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_MED)
+	FX.play_sound(_downed_sound, _downed_sound_pitch)
+	# Run 13 — DESIGN: NO auto-swap on KO. The player stays on their downed
+	# character; the standing partner keeps fighting and may attempt a revive.
+	# Check if both are now down → team-down resolution (DD or Game Over).
+	# Defer one frame so a same-tick partner downed-enter completes first.
+	call_deferred("_check_team_down_state")
+
+
+func _check_team_down_state() -> void:
+	# Iterate every player+bea group node; if ALL are downed, route to RunState.
+	var team: Array = []
+	for n in get_tree().get_nodes_in_group("player"):
+		team.append(n)
+	for n in get_tree().get_nodes_in_group("bea"):
+		if not team.has(n):
+			team.append(n)
+	if team.is_empty():
+		return
+	var all_down: bool = true
+	for n in team:
+		if not is_instance_valid(n):
+			continue
+		if not (n.has_method("is_downed") and n.is_downed()):
+			all_down = false
+			break
+	if not all_down:
+		return
+	# Both down — let RunState decide DD vs. Game Over.
+	RunState.resolve_team_down(team)
+
+
+# Called by RunState.resolve_team_down when DD fires on the team.
+# Restores HP, exits DOWNED state, applies all queued payload HoTs.
+func revive_from_dd(refill_pct: float, payloads: Array) -> void:
+	if not _is_state_downed():
+		return   # defensive
+	var max_hp_eff: int = get_effective_max_hp()
+	current_hp = max(1, int(round(max_hp_eff * refill_pct)))
+	_emit_hp_signal()
+	# Accumulate HoT contributions from ALL payloads (max strength + max duration).
+	var hot_pct: float = 0.0
+	var hot_dur: float = 0.0
+	for p in payloads:
+		var pd: Dictionary = p
+		hot_pct = max(hot_pct, float(pd.get("hot_pct_per_sec", 0.0)))
+		hot_dur = max(hot_dur, float(pd.get("hot_duration", 0.0)))
+	_dd_hot_pct_per_sec = hot_pct
+	_dd_hot_remaining   = hot_dur
+	_dd_hot_accum       = 0.0
+	# Exit downed state with brief get-up i-frames.
+	_clear_revive_ui()
+	iframe_timer = REVIVE_IFRAME_ON_GET_UP
+	is_invulnerable = true
+	modulate = Color(1.0, 1.0, 1.0, 1.0)
+	_set_state_neutral()
+	if body_anim and body_anim.has_method("set_anim_state"):
+		body_anim.set_anim_state("idle")
+	FX.screen_shake(FX.SHAKE_HEAVY, FX.SHAKE_DUR_MED)
+	FX.spawn_burst_particles(global_position, Color(1.0, 0.55, 0.30, 1.0), 22)
+	FX.play_sound("dd_revive", 1.2)
+	print("[%s] DD team-revive — back at %d/%d HP, HoT %.1f%%/s for %.1fs (payloads=%d)." % [
+		hero_id, current_hp, max_hp_eff,
+		_dd_hot_pct_per_sec * 100.0, _dd_hot_remaining, payloads.size(),
+	])
+
+
+# Called by the standing partner when their rez bar fills 100%.
+func revive_from_partner() -> void:
+	if not _is_state_downed():
+		return
+	# Run 27f — Avalanche Aid (Potato passive, team-wide): a completed revive
+	# drops 3 boulders on enemies within ~200px of the revive spot.
+	if RunState.shino_has("avalanche_aid") or RunState.bea_has("avalanche_aid"):
+		var _aa_hit: int = 0
+		for ae in get_tree().get_nodes_in_group("enemy"):
+			if _aa_hit >= 3:
+				break
+			if is_instance_valid(ae) and ae is Node2D \
+			and ae.global_position.distance_to(global_position) <= 200.0:
+				_aa_hit += 1
+				FX.spawn_burst_particles(ae.global_position, Color(0.55, 0.42, 0.28, 1.0), 14)
+				if ae.has_method("take_damage"):
+					ae.take_damage(15, Vector2.ZERO)
+				if ae.has_node("StatusComponent"):
+					ae.get_node("StatusComponent").apply("stagger", 0.7, 1)
+	var max_hp_eff: int = get_effective_max_hp()
+	current_hp = max(1, int(round(max_hp_eff * REVIVE_AT_HP_PCT)))
+	_emit_hp_signal()
+	_clear_revive_ui()
+	iframe_timer = REVIVE_IFRAME_ON_GET_UP
+	is_invulnerable = true
+	modulate = Color(1.0, 1.0, 1.0, 1.0)
+	_set_state_neutral()
+	if body_anim and body_anim.has_method("set_anim_state"):
+		body_anim.set_anim_state("idle")
+	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_MED)
+	FX.spawn_burst_particles(global_position, Color(0.6, 1.0, 0.6, 1.0), 16)
+	FX.play_sound("partner_revive", 1.0)
+	print("[%s] Partner revive — back at %d/%d HP (%.0f%%)." % [
+		hero_id, current_hp, max_hp_eff, REVIVE_AT_HP_PCT * 100.0,
+	])
+
+
+# -------------------------------------------------------
+# Revive UI helpers (revive circle around downed body + rez bar above body).
+# Lightweight — single Line2D ring + 2 ColorRects. Created lazily.
+# -------------------------------------------------------
+func _build_revive_ui() -> void:
+	if _revive_circle_node == null:
+		_revive_circle_node = Node2D.new()
+		_revive_circle_node.name = "ReviveCircle"
+		_revive_circle_node.z_index = -1   # under the body sprite
+		add_child(_revive_circle_node)
+		var ring := Line2D.new()
+		ring.width = 3.0
+		ring.default_color = Color(0.4, 1.0, 0.6, 0.55)
+		ring.closed = true
+		var n: int = 28
+		for i in range(n):
+			var ang: float = TAU * float(i) / float(n)
+			ring.add_point(Vector2(cos(ang), sin(ang)) * REVIVE_CIRCLE_RADIUS)
+		_revive_circle_node.add_child(ring)
+	_revive_circle_node.visible = true
+
+	if _rez_bar_bg == null:
+		_rez_bar_bg = ColorRect.new()
+		_rez_bar_bg.name = "RezBarBG"
+		_rez_bar_bg.color = Color(0.1, 0.1, 0.1, 0.85)
+		_rez_bar_bg.size = Vector2(48.0, 6.0)
+		_rez_bar_bg.position = Vector2(-24.0, -38.0)
+		add_child(_rez_bar_bg)
+		_rez_bar_fill = ColorRect.new()
+		_rez_bar_fill.name = "RezBarFill"
+		_rez_bar_fill.color = Color(0.45, 1.0, 0.55, 0.95)
+		_rez_bar_fill.size = Vector2(0.0, 6.0)
+		_rez_bar_fill.position = Vector2(-24.0, -38.0)
+		add_child(_rez_bar_fill)
+	_rez_bar_bg.visible = true
+	_rez_bar_fill.visible = true
+	_rez_bar_fill.size.x = 0.0
+
+
+func _clear_revive_ui() -> void:
+	if _revive_circle_node and is_instance_valid(_revive_circle_node):
+		_revive_circle_node.visible = false
+	if _rez_bar_bg and is_instance_valid(_rez_bar_bg):
+		_rez_bar_bg.visible = false
+	if _rez_bar_fill and is_instance_valid(_rez_bar_fill):
+		_rez_bar_fill.visible = false
+	if _interact_prompt and is_instance_valid(_interact_prompt):
+		_interact_prompt.visible = false
+	rez_fill = 0.0
+
+
+func _refresh_rez_bar() -> void:
+	# Called by the standing partner via add_rez_fill — update the bar above the
+	# downed body.
+	if _rez_bar_fill and is_instance_valid(_rez_bar_fill):
+		_rez_bar_fill.size.x = clamp(rez_fill, 0.0, 1.0) * 48.0
+
+
+# Called by the standing partner each physics frame they're inside our circle.
+# Returns true if the bar just filled to 100% (caller fires revive_from_partner).
+func add_rez_fill(amount: float) -> bool:
+	if not _is_state_downed():
+		return false
+	rez_fill = min(1.0, rez_fill + amount)
+	_refresh_rez_bar()
+	return rez_fill >= 1.0
+
+
+func get_rez_fill() -> float:
+	return rez_fill
+
+
+# -------------------------------------------------------
+# Revive attempt / channel (runs on the STANDING partner).
+# -------------------------------------------------------
+func _tick_revive_attempt(delta: float) -> void:
+	# Don't try to revive while committed to a non-cancellable move (per-hero set).
+	if _revive_attempt_locked():
+		return
+	var downed: Node = _find_downed_partner()
+	if downed == null:
+		RunState.revive_recall_active = false   # Run 65 — nobody down; drop any recall
+		_hide_interact_prompt()
+		return
+	var dist: float = global_position.distance_to(downed.global_position)
+	var in_circle: bool = (dist <= REVIVE_CIRCLE_RADIUS)
+	var in_channel_range: bool = (dist <= REVIVE_CHANNEL_RANGE)
+	if player_controlled and in_channel_range and _act_jp("interact"):
+		_start_channel_revive(downed)
+		return
+	# AI heuristic (Run 15) — tier-gated per RunState.ai_helper_tier / GDD §8.5.
+	if not player_controlled and in_channel_range:
+		var tier: int = RunState.ai_helper_tier
+		var max_hp_eff: int  = get_effective_max_hp()
+		var hp_pct: float    = float(current_hp) / float(max(1, max_hp_eff))
+		var safe_r: float    = RunState.AI_CHANNEL_SAFE_RANGE
+		var t2_hp: float     = RunState.AI_CHANNEL_HP_T2
+		var t3_hp: float     = RunState.AI_CHANNEL_HP_T3
+		var no_enemies_in_safe: bool = (_count_nearby_enemies(safe_r) == 0)
+		var should_channel: bool = false
+		match tier:
+			1:
+				should_channel = false
+			2:
+				should_channel = (hp_pct > t2_hp) and no_enemies_in_safe
+			_:
+				should_channel = (hp_pct >= t3_hp) and no_enemies_in_safe
+		# Run 65 — manual recall overrides the hesitation: come get me NOW.
+		if RunState.revive_recall_active:
+			should_channel = true
+		if should_channel:
+			_start_channel_revive(downed)
+			return
+	if in_circle:
+		var inc: float = REVIVE_CIRCLE_RATE * delta * RunState.get_sensei_revive_mult()   # Run 46 — Sibling Bond
+		if downed.has_method("add_rez_fill"):
+			var done: bool = downed.add_rez_fill(inc)
+			if done and downed.has_method("revive_from_partner"):
+				downed.revive_from_partner()
+	if player_controlled and in_channel_range:
+		_show_interact_prompt(downed)
+	else:
+		_hide_interact_prompt()
+
+
+func _start_channel_revive(downed: Node) -> void:
+	_cleanup_combat_on_channel_start()
+	_set_state_reviving()
+	_channeling_partner = downed
+	velocity = Vector2.ZERO
+	# Spec: vulnerable during channel.
+	is_invulnerable = false
+	iframe_timer = 0.0
+	FX.play_sound("revive_channel_start", 0.9)
+	print("[%s] Channel-reviving partner..." % hero_id)
+
+
+func _tick_channel_revive(delta: float) -> void:
+	if _channeling_partner == null or not is_instance_valid(_channeling_partner):
+		_cancel_channel_revive()
+		return
+	if not (_channeling_partner.has_method("is_downed") and _channeling_partner.is_downed()):
+		_cancel_channel_revive()
+		return
+	if _act_jp("dash") and dash_cd_timer <= 0.0:
+		_cancel_channel_revive()
+		_start_dash()
+		return
+	# Run 66 — manual recall (downed player's Q+Q) suppresses the T3+ dash-cancel.
+	# Otherwise a swarmed body makes "enemy attack imminent" fire every frame and
+	# the AI thrashes between REVIVING and neutral — the rez bar never advances
+	# (the T5 softlock). A recall means "rez me NOW," so push the channel through.
+	if not player_controlled and RunState.ai_helper_tier >= 3 and dash_cd_timer <= 0.0 \
+	and not RunState.revive_recall_active:
+		if _ai_enemy_attack_imminent(RunState.AI_DASH_CANCEL_RANGE):
+			print("[%s AI T3] Dash-canceling channel — enemy attack imminent." % hero_id)
+			_cancel_channel_revive()
+			_start_dash()
+			return
+	velocity = Vector2.ZERO
+	move_and_slide()
+	var inc: float = REVIVE_CHANNEL_RATE * delta * RunState.get_sensei_revive_mult()   # Run 46 — Sibling Bond
+	if _channeling_partner.has_method("add_rez_fill"):
+		var done: bool = _channeling_partner.add_rez_fill(inc)
+		if done:
+			if _channeling_partner.has_method("revive_from_partner"):
+				_channeling_partner.revive_from_partner()
+			_channeling_partner = null
+			_set_state_neutral()
+			FX.play_sound("revive_channel_complete", 1.1)
+
+
+func _cancel_channel_revive() -> void:
+	_channeling_partner = null
+	_set_state_neutral()
+
+
+# -------------------------------------------------------
+# Find a downed partner — checks both bea and player groups, excludes self.
+# -------------------------------------------------------
+func _find_downed_partner() -> Node:
+	var pool: Array = []
+	for n in get_tree().get_nodes_in_group("player"):
+		if n != self:
+			pool.append(n)
+	for n in get_tree().get_nodes_in_group("bea"):
+		if n != self and not pool.has(n):
+			pool.append(n)
+	for c in pool:
+		if not is_instance_valid(c):
+			continue
+		if c.has_method("is_downed") and c.is_downed():
+			return c
+	return null
+
+
+# -------------------------------------------------------
+# Interact prompt UI.
+# -------------------------------------------------------
+func _show_interact_prompt(_downed: Node) -> void:
+	if _interact_prompt == null:
+		_interact_prompt = Label.new()
+		_interact_prompt.name = "InteractPrompt"
+		_interact_prompt.text = "Press [E] to revive"
+		_interact_prompt.add_theme_font_size_override("font_size", 12)
+		_interact_prompt.modulate = Color(1.0, 1.0, 0.7, 1.0)
+		_interact_prompt.position = Vector2(-50.0, -54.0)
+		add_child(_interact_prompt)
+	_interact_prompt.visible = true
+
+
+func _hide_interact_prompt() -> void:
+	if _interact_prompt and is_instance_valid(_interact_prompt):
+		_interact_prompt.visible = false
+
+
+# -------------------------------------------------------
+# Trivial getters (public API — Wiring_Map §7).
+# -------------------------------------------------------
+func get_current_hp() -> int:
+	return current_hp
+
+
+func get_current_chi() -> int:
+	return current_chi
