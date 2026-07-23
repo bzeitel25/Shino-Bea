@@ -4870,7 +4870,8 @@ func _tick_hydration(delta: float) -> void:
 	var in_combat: bool = false
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if is_instance_valid(e) and (not e.has_method("is_alive") or e.is_alive()):
-			if global_position.distance_to(e.global_position) < 480.0:
+			# Bruno ruling 2026-07-23: unified both heroes to 400 (was 480 / Shino 320).
+			if global_position.distance_to(e.global_position) < 400.0:
 				in_combat = true
 				break
 	if in_combat:
@@ -4884,9 +4885,11 @@ func _tick_hydration(delta: float) -> void:
 	if _hydration_tick_accum >= 1.0:
 		var gain: int = int(floor(_hydration_tick_accum))
 		_hydration_tick_accum -= float(gain)
-		if current_chi < MAX_CHI:
-			current_chi = min(MAX_CHI, current_chi + gain)
-			emit_signal("bea_chi_changed", current_chi, MAX_CHI)
+		# Parity fix (same family as ROT-7): cap honors max-chi boons.
+		var _hy_cap: int = get_effective_max_chi()
+		if current_chi < _hy_cap:
+			current_chi = min(_hy_cap, current_chi + gain)
+			emit_signal("bea_chi_changed", current_chi, _hy_cap)
 
 
 func _tick_iron_will(delta: float) -> void:

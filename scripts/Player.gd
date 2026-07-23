@@ -5744,14 +5744,15 @@ func _tick_hydration(delta: float) -> void:
 		return
 	if current_hp <= 0:
 		return
-	# "In combat" = at least one live enemy within 320px.
+	# "In combat" = at least one live enemy within 400px (Bruno ruling 2026-07-23:
+	# unified both heroes to 400 — was Shino 320 / Bea 480).
 	var in_combat: bool = false
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if not is_instance_valid(e):
 			continue
 		if e.has_method("is_alive") and not e.is_alive():
 			continue
-		if global_position.distance_to(e.global_position) <= 320.0:
+		if global_position.distance_to(e.global_position) <= 400.0:
 			in_combat = true
 			break
 	if in_combat:
