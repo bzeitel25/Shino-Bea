@@ -1,7 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://shino_door_choice"]
-
-[ext_resource type="Script" path="res://scripts/DoorChoice.gd" id="1_door_choice"]
-
-[node name="DoorChoice" type="CanvasLayer"]
-layer = 110
-script = ExtResource("1_door_choice")
