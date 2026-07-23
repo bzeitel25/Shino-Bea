@@ -1,0 +1,156 @@
+[gd_scene format=3 uid="uid://dx3feyobpkc0k"]
+
+[ext_resource type="Script" path="res://scripts/TestArena.gd" id="1_arena"]
+[ext_resource type="PackedScene" path="res://scenes/Shino.tscn" id="2_player"]
+[ext_resource type="Script" uid="uid://u4k11r0adgve" path="res://scripts/CameraFollow.gd" id="3_camera"]
+[ext_resource type="PackedScene" path="res://scenes/HUD.tscn" id="4_hud"]
+[ext_resource type="PackedScene" path="res://scenes/Bea.tscn" id="5_bea"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_h"]
+size = Vector2(1024, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_h_full"]
+size = Vector2(1024, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_v"]
+size = Vector2(32, 768)
+
+[node name="TestArena" type="Node2D" unique_id=681410751]
+script = ExtResource("1_arena")
+
+[node name="Floor" type="ColorRect" parent="." unique_id=1003121106]
+offset_left = -480.0
+offset_top = -352.0
+offset_right = 480.0
+offset_bottom = 352.0
+color = Color(0.18, 0.21, 0.18, 1)
+
+[node name="FloorGrid" type="ColorRect" parent="." unique_id=1515511562]
+offset_left = -480.0
+offset_top = -352.0
+offset_right = 480.0
+offset_bottom = 352.0
+color = Color(0.22, 0.25, 0.22, 1)
+
+[node name="Walls" type="Node2D" parent="." unique_id=606680861]
+
+[node name="WallTop" type="StaticBody2D" parent="Walls" unique_id=821953969]
+position = Vector2(0, -368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallTop" unique_id=521437096]
+offset_left = -512.0
+offset_top = -16.0
+offset_right = 512.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallTop" unique_id=795100202]
+shape = SubResource("RectangleShape2D_wall_h")
+
+[node name="WallBottom" type="StaticBody2D" parent="Walls" unique_id=1532280903]
+position = Vector2(0, 368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallBottom" unique_id=713991674]
+offset_left = -512.0
+offset_top = -16.0
+offset_right = 512.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallBottom" unique_id=1607667612]
+shape = SubResource("RectangleShape2D_wall_h_full")
+
+[node name="WallLeft" type="StaticBody2D" parent="Walls" unique_id=759747454]
+position = Vector2(-496, 0)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallLeft" unique_id=461918599]
+offset_left = -16.0
+offset_top = -384.0
+offset_right = 16.0
+offset_bottom = 384.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallLeft" unique_id=2060253433]
+shape = SubResource("RectangleShape2D_wall_v")
+
+[node name="WallRight" type="StaticBody2D" parent="Walls" unique_id=555830161]
+position = Vector2(496, 0)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallRight" unique_id=1608498796]
+offset_left = -16.0
+offset_top = -384.0
+offset_right = 16.0
+offset_bottom = 384.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallRight" unique_id=1566379604]
+shape = SubResource("RectangleShape2D_wall_v")
+
+[node name="Player" parent="." unique_id=2050991714 instance=ExtResource("2_player")]
+position = Vector2(0, -180)
+
+[node name="Bea" parent="." unique_id=550004093 instance=ExtResource("5_bea")]
+position = Vector2(32, -180)
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=322523614]
+zoom = Vector2(1.5, 1.5)
+script = ExtResource("3_camera")
+
+[node name="Enemies" type="Node2D" parent="." unique_id=594014714]
+
+[node name="DebugHUD" type="CanvasLayer" parent="." unique_id=1868821769]
+layer = 5
+
+[node name="WaveLabel" type="Label" parent="DebugHUD" unique_id=590589424]
+offset_left = 480.0
+offset_top = 12.0
+offset_right = 800.0
+offset_bottom = 48.0
+theme_override_colors/font_color = Color(1, 0.92, 0.45, 1)
+theme_override_font_sizes/font_size = 24
+text = "Wave 1 / 10"
+horizontal_alignment = 1
+
+[node name="ControlsHint" type="Label" parent="DebugHUD" unique_id=1741390691]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 540.0
+offset_bottom = 200.0
+theme_override_colors/font_color = Color(0.84, 0.86, 0.92, 0.92)
+theme_override_font_sizes/font_size = 12
+text = "SHINO  WASD move | J=Light combo | K=Heavy combo | L=Ki Blast
+HOLD J=Punch Flurry | HOLD K=Crane Kick (AoE) | HOLD L=Kamehameha
+SPACE=Dash (i-frames) | U=ULT (fires when Chi bar is FULL — watch for ⚡ ULT READY)
+Q×2=Swap to BEA | E=Revive partner
+
+Boon rooms every wave. ~UPGRADE ROOM~ = Pie (+Max HP) or Dragon Fruit (level up a boon).
+Juice = auto-heal both heroes after arenas 5, 10, 15, 20.
+
+Press H to hide this panel."
+
+[node name="WaveClearedLabel" type="Label" parent="DebugHUD" unique_id=599526327]
+visible = false
+modulate = Color(1, 0.9, 0.3, 1)
+offset_left = 180.0
+offset_top = 260.0
+offset_right = 1100.0
+offset_bottom = 360.0
+theme_override_colors/font_color = Color(1, 0.9, 0.3, 1)
+theme_override_font_sizes/font_size = 32
+text = "✦ WAVE CLEARED! ✦"
+horizontal_alignment = 1
+
+[node name="BoonsLabel" type="Label" parent="DebugHUD" unique_id=120162424]
+modulate = Color(0.7, 0.85, 0.95, 1)
+offset_left = 16.0
+offset_top = 240.0
+offset_right = 1100.0
+offset_bottom = 270.0
+theme_override_font_sizes/font_size = 14
+text = "Boons: (none yet)"
+
+[node name="HUD" parent="." unique_id=784045335 instance=ExtResource("4_hud")]

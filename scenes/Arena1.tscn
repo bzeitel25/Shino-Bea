@@ -1,0 +1,232 @@
+[gd_scene format=3 uid="uid://ca8t7yfj3lgo1"]
+
+[ext_resource type="Script" uid="uid://b28216wtmgy8e" path="res://scripts/World.gd" id="1_world"]
+[ext_resource type="PackedScene" path="res://scenes/Shino.tscn" id="2_player"]
+[ext_resource type="Script" uid="uid://u4k11r0adgve" path="res://scripts/CameraFollow.gd" id="3_camera"]
+[ext_resource type="PackedScene" path="res://scenes/DummyEnemy.tscn" id="4_dummy"]
+[ext_resource type="PackedScene" path="res://scenes/HUD.tscn" id="5_hud"]
+[ext_resource type="Script" uid="uid://domvc13m0w335" path="res://scripts/EnemySpawner.gd" id="6_spawner"]
+[ext_resource type="PackedScene" path="res://scenes/Bea.tscn" id="7_bea"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_h"]
+size = Vector2(1024, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_bottom_half"]
+size = Vector2(480, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_bottom_mid"]
+size = Vector2(192, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_bottom_far"]
+size = Vector2(224, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_gate"]
+size = Vector2(64, 32)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_door_trigger"]
+size = Vector2(64, 48)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall_v"]
+size = Vector2(32, 768)
+
+[node name="World" type="Node2D" unique_id=1061379373]
+script = ExtResource("1_world")
+
+[node name="Floor" type="ColorRect" parent="." unique_id=1920049205]
+offset_left = -480.0
+offset_top = -352.0
+offset_right = 480.0
+offset_bottom = 352.0
+color = Color(0.18, 0.21, 0.18, 1)
+
+[node name="FloorGrid" type="ColorRect" parent="." unique_id=1088712068]
+offset_left = -480.0
+offset_top = -352.0
+offset_right = 480.0
+offset_bottom = 352.0
+color = Color(0.22, 0.25, 0.22, 1)
+
+[node name="Walls" type="Node2D" parent="." unique_id=1724774602]
+
+[node name="WallTop" type="StaticBody2D" parent="Walls" unique_id=386325993]
+position = Vector2(0, -368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallTop" unique_id=454735787]
+offset_left = -512.0
+offset_top = -16.0
+offset_right = 512.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallTop" unique_id=277882752]
+shape = SubResource("RectangleShape2D_wall_h")
+
+[node name="WallBottomLeft" type="StaticBody2D" parent="Walls" unique_id=142582856]
+position = Vector2(-272, 368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallBottomLeft" unique_id=212057822]
+offset_left = -240.0
+offset_top = -16.0
+offset_right = 240.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallBottomLeft" unique_id=273523014]
+shape = SubResource("RectangleShape2D_wall_bottom_half")
+
+[node name="WallBottomMid" type="StaticBody2D" parent="Walls" unique_id=447750929]
+position = Vector2(128, 368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallBottomMid" unique_id=942693734]
+offset_left = -96.0
+offset_top = -16.0
+offset_right = 96.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallBottomMid" unique_id=205398514]
+shape = SubResource("RectangleShape2D_wall_bottom_mid")
+
+[node name="WallBottomFar" type="StaticBody2D" parent="Walls" unique_id=523182400]
+position = Vector2(400, 368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallBottomFar" unique_id=1909647457]
+offset_left = -112.0
+offset_top = -16.0
+offset_right = 112.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallBottomFar" unique_id=786785851]
+shape = SubResource("RectangleShape2D_wall_bottom_far")
+
+[node name="GateB" type="StaticBody2D" parent="Walls" unique_id=1642000526]
+position = Vector2(256, 368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/GateB" unique_id=1911070954]
+offset_left = -32.0
+offset_top = -16.0
+offset_right = 32.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/GateB" unique_id=149884851]
+shape = SubResource("RectangleShape2D_gate")
+
+[node name="DoorTrigger" type="Area2D" parent="Walls/GateB" unique_id=1965352551]
+position = Vector2(0, -16)
+collision_layer = 0
+collision_mask = 2
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/GateB/DoorTrigger" unique_id=526912917]
+shape = SubResource("RectangleShape2D_door_trigger")
+
+[node name="Gate" type="StaticBody2D" parent="Walls" unique_id=1438578101]
+position = Vector2(0, 368)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/Gate" unique_id=178583918]
+offset_left = -32.0
+offset_top = -16.0
+offset_right = 32.0
+offset_bottom = 16.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/Gate" unique_id=1916149918]
+shape = SubResource("RectangleShape2D_gate")
+
+[node name="DoorTrigger" type="Area2D" parent="Walls/Gate" unique_id=668348492]
+position = Vector2(0, -16)
+collision_layer = 0
+collision_mask = 2
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/Gate/DoorTrigger" unique_id=872626680]
+shape = SubResource("RectangleShape2D_door_trigger")
+
+[node name="WallLeft" type="StaticBody2D" parent="Walls" unique_id=927914032]
+position = Vector2(-496, 0)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallLeft" unique_id=1465738391]
+offset_left = -16.0
+offset_top = -384.0
+offset_right = 16.0
+offset_bottom = 384.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallLeft" unique_id=1313878444]
+shape = SubResource("RectangleShape2D_wall_v")
+
+[node name="WallRight" type="StaticBody2D" parent="Walls" unique_id=1100313336]
+position = Vector2(496, 0)
+collision_mask = 0
+
+[node name="Visual" type="ColorRect" parent="Walls/WallRight" unique_id=1532550781]
+offset_left = -16.0
+offset_top = -384.0
+offset_right = 16.0
+offset_bottom = 384.0
+color = Color(0.4, 0.3, 0.22, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Walls/WallRight" unique_id=265781007]
+shape = SubResource("RectangleShape2D_wall_v")
+
+[node name="Player" parent="." unique_id=1342925276 instance=ExtResource("2_player")]
+position = Vector2(0, -180)
+
+[node name="Bea" parent="." unique_id=1995046505 instance=ExtResource("7_bea")]
+position = Vector2(32, -180)
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=312399727]
+zoom = Vector2(1.5, 1.5)
+script = ExtResource("3_camera")
+
+[node name="Enemies" type="Node2D" parent="." unique_id=1437569689]
+
+[node name="EnemySpawner" type="Node2D" parent="." unique_id=303765508]
+script = ExtResource("6_spawner")
+enemy_scene = ExtResource("4_dummy")
+spawn_count = 5
+min_spawn_dist = 190.0
+max_spawn_dist = 330.0
+
+[node name="DebugHUD" type="CanvasLayer" parent="." unique_id=1649573943]
+layer = 5
+
+[node name="ControlsLabel" type="Label" parent="DebugHUD" unique_id=1147101688]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 660.0
+offset_bottom = 130.0
+text = "Shino & Bea — Arena 1 / 10
+SHINO: J=punch HOLD-J=Flurry  K=kick HOLD-K=Crane  L=KiBlast HOLD-L=Beam  U=ULT
+BEA (after Q+Q): J=katana HOLD-J=Whirl  K=naginata HOLD-K=MeteorLeap  L=Kunai HOLD-L=ShurikenFlurry  U=ThousandCutDance
+WASD=move  SPACE=dash  |  Clear enemies → pick a Boon → choose a DOOR → on to the next room
+Press H to hide the controls hint."
+
+[node name="WaveClearedLabel" type="Label" parent="DebugHUD" unique_id=306587050]
+visible = false
+modulate = Color(1, 0.9, 0.3, 1)
+offset_left = 180.0
+offset_top = 280.0
+offset_right = 840.0
+offset_bottom = 340.0
+theme_override_font_sizes/font_size = 32
+text = "✦ WAVE CLEARED! ✦  Walk south through the green gate!"
+horizontal_alignment = 1
+
+[node name="BoonsLabel" type="Label" parent="DebugHUD" unique_id=1140859482]
+modulate = Color(0.7, 0.85, 0.95, 1)
+offset_left = 16.0
+offset_top = 210.0
+offset_right = 1100.0
+offset_bottom = 240.0
+theme_override_font_sizes/font_size = 14
+text = "Boons: (none yet)"
+
+[node name="HUD" parent="." unique_id=2004224361 instance=ExtResource("5_hud")]

@@ -1,7 +1,7 @@
 [gd_scene load_steps=14 format=3 uid="uid://shino_arena9"]
 
 [ext_resource type="Script" path="res://scripts/World.gd" id="1_world"]
-[ext_resource type="PackedScene" uid="uid://shino_player" path="res://scenes/Player.tscn" id="2_player"]
+[ext_resource type="PackedScene" uid="uid://shino_player" path="res://scenes/Shino.tscn" id="2_player"]
 [ext_resource type="Script" path="res://scripts/CameraFollow.gd" id="3_camera"]
 [ext_resource type="PackedScene" uid="uid://shino_dummyenemy" path="res://scenes/DummyEnemy.tscn" id="4_dummy"]
 [ext_resource type="PackedScene" uid="uid://shino_hud" path="res://scenes/HUD.tscn" id="5_hud"]

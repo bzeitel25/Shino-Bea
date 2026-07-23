@@ -313,7 +313,7 @@ func _position_heroes() -> void:
 	var player: Node = _find_player()
 	if player == null:
 		# Spawn Shino
-		var player_scene: PackedScene = load("res://scenes/Player.tscn")
+		var player_scene: PackedScene = load("res://scenes/Shino.tscn")   # renamed from Player.tscn (Phase-1 close)
 		if player_scene:
 			player = player_scene.instantiate()
 			add_child(player)

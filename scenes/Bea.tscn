@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://shino_bea"]
 
-[ext_resource type="Script" path="res://scripts/BeaAI.gd" id="1_bea"]
+[ext_resource type="Script" path="res://scripts/Bea.gd" id="1_bea"]
 [ext_resource type="Script" path="res://scripts/BodyAnimator.gd" id="2_anim"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
