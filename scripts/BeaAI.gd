@@ -4805,12 +4805,8 @@ const HYDRATION_RAMP_TIME: float = 8.0
 
 # _iron_will_ready, _iron_will_cd_timer moved to HeroBase (Batch 3).
 
-var _critical_mass_stacks: int = 0
-var _critical_mass_timer: float = 0.0
-
-# Combat Fury (Broccoli) — Bea's own consecutive-hit tier tracker.
-var _combat_fury_tier: int = 0
-var _combat_fury_decay_timer: float = 0.0
+# _critical_mass_stacks, _critical_mass_timer moved to HeroBase (Batch 7).
+# _combat_fury_tier, _combat_fury_decay_timer moved to HeroBase (Batch 7).
 
 var _peel_out_timer: float = 0.0
 var _hot_footed_timer: float = 0.0
@@ -4892,30 +4888,9 @@ func _tick_hydration(delta: float) -> void:
 			emit_signal("bea_chi_changed", current_chi, _hy_cap)
 
 
-func _tick_iron_will(delta: float) -> void:
-	if not RunState.bea_has("iron_will") or _iron_will_ready:
-		return
-	_iron_will_cd_timer -= delta
-	if _iron_will_cd_timer <= 0.0:
-		_iron_will_ready = true
-
-
-func _tick_critical_mass(delta: float) -> void:
-	if not RunState.bea_has("critical_mass") or _critical_mass_stacks <= 0:
-		return
-	_critical_mass_timer -= delta
-	if _critical_mass_timer <= 0.0:
-		_critical_mass_stacks = 0
-
-
-# Run 139 — Bea's own Combat Fury decay (mirrors Player.gd: tier → 0 after
-# COMBAT_FURY_DECAY_SEC without a landed hit).
-func _tick_combat_fury(delta: float) -> void:
-	if not RunState.bea_has("combat_fury") or _combat_fury_decay_timer <= 0.0:
-		return
-	_combat_fury_decay_timer -= delta
-	if _combat_fury_decay_timer <= 0.0:
-		_combat_fury_tier = 0
+# _tick_iron_will, _tick_critical_mass, _tick_combat_fury moved to HeroBase
+# (Batch 7). Bea's _physics_process still calls them — now inherited, gated by
+# _hero_has instead of RunState.bea_has.
 
 
 # Run 60 — Bea-side family charge-release dispatches. Mirrors Player.gd's

@@ -105,6 +105,12 @@ var _peel_resto_icd: float = 0.0               # Peel Restoration per-hero heal 
 var _ingrained_time: float = 0.0               # stand-still timer (Ingrained mechanic)
 var _iron_will_ready: bool = true              # Iron Will: defy next CC
 var _iron_will_cd_timer: float = 0.0
+# Critical Mass (Carrot) — crit → +15% MS/AS per stack, max 3, 4s each. (Batch 7)
+var _critical_mass_stacks: int = 0
+var _critical_mass_timer: float = 0.0
+# Combat Fury (Broccoli) — consecutive-hit tier tracker; decays after no hits. (Batch 7)
+var _combat_fury_tier: int = 0
+var _combat_fury_decay_timer: float = 0.0
 # Run 19 — Shell Cluster mirror-share recursion guard (one flag per hero instance).
 var _shell_cluster_mirror_pending: bool = false
 
@@ -1144,3 +1150,35 @@ func _spawn_vine_visual(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
 	tw.tween_property(vine, "modulate:a", 0.0, 0.28)
 	tw.tween_callback(vine.queue_free)
 	FX.play_sound("ground_pound", 1.0)
+
+
+# ------------------------------------------------------------------
+# Standalone boon-decay ticks (Batch 7 — unified from Shino's _tick_timers
+# monolith + Bea's standalone _tick_*; per-hero gate via _hero_has).
+# ------------------------------------------------------------------
+
+# Critical Mass (Carrot) — top-stack duration decay; all stacks share one timer.
+func _tick_critical_mass(delta: float) -> void:
+	if not _hero_has("critical_mass") or _critical_mass_stacks <= 0:
+		return
+	_critical_mass_timer -= delta
+	if _critical_mass_timer <= 0.0:
+		_critical_mass_stacks = 0
+
+
+# Iron Will (Broccoli) — CC-defy cooldown tick (re-arms after 10s).
+func _tick_iron_will(delta: float) -> void:
+	if not _hero_has("iron_will") or _iron_will_ready:
+		return
+	_iron_will_cd_timer -= delta
+	if _iron_will_cd_timer <= 0.0:
+		_iron_will_ready = true
+
+
+# Combat Fury (Broccoli) — tier decays to 0 after the no-hit window elapses.
+func _tick_combat_fury(delta: float) -> void:
+	if not _hero_has("combat_fury") or _combat_fury_decay_timer <= 0.0:
+		return
+	_combat_fury_decay_timer -= delta
+	if _combat_fury_decay_timer <= 0.0:
+		_combat_fury_tier = 0

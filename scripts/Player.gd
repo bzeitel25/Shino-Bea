@@ -204,8 +204,7 @@ var _corrupt_aura_accum: float = 0.0    # Thunderstruck / Fermented Wrath aura t
 var _zip_dash_ms_timer: float = 0.0
 
 # --- Critical Mass (Carrot) — crit → +15% MS/AS per stack, max 3 stacks, 4s each ---
-var _critical_mass_stacks: int = 0
-var _critical_mass_timer: float = 0.0   # duration of current top stack
+# _critical_mass_stacks, _critical_mass_timer moved to HeroBase (Batch 7).
 
 # --- Iron Will (Broccoli) — CC defy: immune to next CC every 10s ---
 # _iron_will_ready, _iron_will_cd_timer moved to HeroBase (Batch 3).
@@ -238,8 +237,7 @@ const HYDRATION_RAMP_TIME: float = 8.0       # seconds to reach ramp rate
 
 # --- Combat Fury (Broccoli) — per-player consecutive-hit tier tracker ---
 # Tier increments on each hit, decays to 0 after COMBAT_FURY_DECAY_SEC of no hits.
-var _combat_fury_tier: int = 0
-var _combat_fury_decay_timer: float = 0.0
+# _combat_fury_tier, _combat_fury_decay_timer moved to HeroBase (Batch 7).
 
 # --- Combo inter-step chain delay ---
 # ATTACK_RECOVERY is defined but was unused. This timer applies it between
@@ -771,7 +769,26 @@ func _update_sprite_animation() -> void:
 # -------------------------------------------------------
 # Timer management
 # -------------------------------------------------------
+# Run 154 (Batch 7) — decomposed from the ~330-line monolith into named
+# _tick_* sections. This dispatcher calls them in the ORIGINAL execution order
+# (order is behavior — do not reorder). _tick_critical_mass / _tick_iron_will /
+# _tick_combat_fury are inherited from HeroBase (unified with Bea's copies).
 func _tick_timers(delta: float) -> void:
+	_tick_movement_timers(delta)
+	_tick_ingrained_and_absorb(delta)
+	_tick_corrupt_boons(delta)
+	_tick_regen_duos(delta)
+	_tick_critical_mass(delta)
+	_tick_iron_will(delta)
+	_tick_shell_timers(delta)
+	_tick_dash_burst(delta)
+	_tick_iframe_window(delta)
+	_tick_attack_and_combo(delta)
+	_tick_combat_fury(delta)
+	_tick_combo_chain_and_charge(delta)
+
+
+func _tick_movement_timers(delta: float) -> void:
 	# Frost decay — melt one stack every FROST_STACK_DECAY seconds.
 	if frost_stacks > 0:
 		_frost_decay_t -= delta
@@ -826,6 +843,8 @@ func _tick_timers(delta: float) -> void:
 	if _evergreen_step_cd_timer > 0.0:
 		_evergreen_step_cd_timer = max(0.0, _evergreen_step_cd_timer - delta)
 
+
+func _tick_ingrained_and_absorb(delta: float) -> void:
 	# Run 27b — Ingrained (standing-still) tracking + Ingrained-gated duos.
 	# Position-delta based so baked-in attack lunges/charge windups don't break
 	# the state harder than actual movement does (per Combat_Boons §5.1 note).
@@ -867,6 +886,9 @@ func _tick_timers(delta: float) -> void:
 		_bullseye_finale_window -= delta
 	if _drupe_invuln_timer > 0.0:
 		_drupe_invuln_timer -= delta   # Run 128 — Drupe Guard window
+
+
+func _tick_corrupt_boons(delta: float) -> void:
 	# Run 130 — Marksman's Eye: every 5s Mark the highest-HP enemy on screen.
 	if RunState.team_has("marksmans_eye"):
 		_marksman_timer -= delta
@@ -912,6 +934,9 @@ func _tick_timers(delta: float) -> void:
 					if e.has_node("StatusComponent"):
 						# 3 stacks/sec = ~1.5 per half-second tick → alternate 1/2.
 						e.get_node("StatusComponent").apply("poison", 4.0, 2)
+
+
+func _tick_regen_duos(delta: float) -> void:
 	# Run 27e — Heirloom duo (Apple+Onion): regen follows the player — soft
 	# orchard aura heals 1 HP per 2s while in combat (approximation of
 	# "regen zones follow you" until a zone-ownership system exists).
@@ -935,19 +960,8 @@ func _tick_timers(delta: float) -> void:
 		else:
 			_candy_apple_decay = 0.0
 
-	# Critical Mass (Carrot) — each crit grants +15% MS/AS for 4s, max 3 stacks.
-	# All stacks share one timer; landing a new crit refreshes to full duration.
-	if RunState.shino_has("critical_mass") and _critical_mass_stacks > 0:
-		_critical_mass_timer -= delta
-		if _critical_mass_timer <= 0.0:
-			_critical_mass_stacks = 0
 
-	# Iron Will (Broccoli) — CC defy cooldown tick.
-	if RunState.shino_has("iron_will") and not _iron_will_ready:
-		_iron_will_cd_timer -= delta
-		if _iron_will_cd_timer <= 0.0:
-			_iron_will_ready = true
-
+func _tick_shell_timers(delta: float) -> void:
 	# Battle Shell (Coconut) — duration of the temp overshield granted on KO/X-finisher.
 	if _battle_shell_timer > 0.0:
 		_battle_shell_timer -= delta
@@ -956,6 +970,8 @@ func _tick_timers(delta: float) -> void:
 	if _aimed_guard_icd > 0.0:
 		_aimed_guard_icd -= delta
 
+
+func _tick_dash_burst(delta: float) -> void:
 	# Dash burst duration
 	if dash_timer > 0.0:
 		dash_timer -= delta
@@ -996,6 +1012,8 @@ func _tick_timers(delta: float) -> void:
 			if RunState.slip_stream_taken:
 				_apply_slip_stream()
 
+
+func _tick_iframe_window(delta: float) -> void:
 	# I-frame window (may outlast the burst).
 	# BURROWING keeps invulnerability alive independently of iframe_timer.
 	if state == State.BURROWING:
@@ -1006,6 +1024,8 @@ func _tick_timers(delta: float) -> void:
 	else:
 		is_invulnerable = false
 
+
+func _tick_attack_and_combo(delta: float) -> void:
 	# Attack animation clock
 	if attack_timer > 0.0:
 		attack_timer -= delta
@@ -1060,12 +1080,8 @@ func _tick_timers(delta: float) -> void:
 			else:
 				combo_decay_timer = 0.0
 
-	# Combat Fury (Broccoli) — decay tier toward 0 after 3s of no hits.
-	if RunState.shino_has("combat_fury") and _combat_fury_decay_timer > 0.0:
-		_combat_fury_decay_timer -= delta
-		if _combat_fury_decay_timer <= 0.0:
-			_combat_fury_tier = 0
 
+func _tick_combo_chain_and_charge(delta: float) -> void:
 	# Combo chain delay — brief pause between combo steps (ATTACK_RECOVERY).
 	# Also used for cross-cancel delays (see _combo_chain_is_cross_cancel).
 	if _combo_chain_pending and _combo_chain_timer > 0.0:
