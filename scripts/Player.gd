@@ -1,4 +1,4 @@
-extends CharacterBody2D
+extends "res://scripts/HeroBase.gd"
 
 const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glide
 
