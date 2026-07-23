@@ -29,8 +29,8 @@ const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glid
 @export var max_hp: int = 80
 @export var move_speed: float = 230.0
 
-var current_hp: int = 80
-var current_chi: int = 0
+# current_hp, current_chi moved to HeroBase (Batch 3); current_hp reset to
+# max_hp at _ready top.
 const MAX_CHI: int = 100
 
 const CHI_PER_DAMAGE_DEALT: float = 0.5
@@ -458,8 +458,7 @@ var status: StatusComponent = null
 # Charges granted on dash by RunState.overshield_grant_on_dash (rarity-scaled).
 # Each charge absorbs one incoming hit (take_damage early-returns on consume).
 # When a charge breaks AND Nutshell is taken, _fire_nutshell_shockwave runs.
-var overshield_charges: int = 0
-var _overshield_aura: Node2D = null   # lazy visual halo (Line2D ring)
+# overshield_charges, _overshield_aura moved to HeroBase (Batch 3).
 
 # --- Run 133 — Bea on-kill hook (mirror of Player.gd _on_enemy_killed) ---
 # Battle Shell temp-overshield duration marker (bookkeeping; overshields also
@@ -501,6 +500,9 @@ func _bump_combo() -> void:
 func _ready() -> void:
 	hero_id = "bea"   # HeroBase identity — per-hero RunState gating key
 	current_hp = max_hp
+	# Batch 3 — Bea's external-heal particle FX (base default is Shino's).
+	_heal_fx_color = Color(0.90, 0.60, 0.20, 1.0)
+	_heal_fx_count = 4
 	add_to_group("bea")
 	add_to_group("player")   # so door trigger and enemy AI can find both characters
 
@@ -2019,32 +2021,21 @@ func _spawn_vine_visual(from_pos: Vector2, to_pos: Vector2, col: Color) -> void:
 # Overshield on dash, Nutshell on overshield break, Hard Landing
 # vetoes Bash while charging.
 # -------------------------------------------------------
-func can_receive_status(id: String) -> bool:
-	# Hulk Smash: full super-armor during any charge or release state — Batch 0
-	# ROT-5 parity with Player.gd, mapped to Bea's charge/release states.
-	if RunState.bea_has("hulk_smash") and id in ["bash", "frozen", "root", "stagger", "slippery", "greased"]:
-		if state in [State.BEA_CHARGING, State.BEA_CHARGED, State.BEA_WHIRLING, State.BEA_DIVING, State.BEA_FLURRYING]:
-			return false
-	# Run 27b — Heavy Stance: stagger immunity while Ingrained (1.5s+ still).
-	if RunState.bea_has("heavy_stance") and _ingrained_time >= RunState.INGRAINED_THRESHOLD and id in ["stagger", "bash"]:
-		return false
-	# Run 27f — Burnout corrupt: 50% chance to fully resist any incoming CC.
-	if RunState.bea_has("corrupt_broccoli") and id in ["bash", "frozen", "root", "stagger", "slippery", "greased"] and randf() < 0.50:
-		return false
-	# Hard Landing: immune to bash while charging.
-	if RunState.bea_has("hard_landing"):
-		if id == "bash" and (state == State.BEA_CHARGING or state == State.BEA_CHARGED):
-			return false
-	# Iron Will: defy next CC class status every 10s.
-	if RunState.bea_has("iron_will") and _iron_will_ready:
-		var cc_ids: Array = ["bash", "frozen", "root", "stagger"]
-		if id in cc_ids:
-			_iron_will_ready = false
-			_iron_will_cd_timer = 10.0
-			FX.spawn_hit_particles(global_position, Color(0.25, 0.70, 0.25, 0.90), 8)
-			FX.play_sound("iron_will_proc", 0.85)
-			return false
-	return true
+# can_receive_status moved to HeroBase (Batch 3). Per-hero hooks it calls:
+func _hero_has(id: String) -> bool:
+	return RunState.bea_has(id)
+
+func _emit_hp_signal() -> void:
+	emit_signal("bea_hp_changed", current_hp, get_effective_max_hp())
+
+func _emit_chi_signal() -> void:
+	emit_signal("bea_chi_changed", current_chi, get_effective_max_chi())
+
+func _in_charge_or_release_state() -> bool:
+	return state in [State.BEA_CHARGING, State.BEA_CHARGED, State.BEA_WHIRLING, State.BEA_DIVING, State.BEA_FLURRYING]
+
+func _is_charging_state() -> bool:
+	return state == State.BEA_CHARGING or state == State.BEA_CHARGED
 
 
 func _grant_overshield_on_dash() -> void:
@@ -2058,7 +2049,8 @@ func _grant_overshield_on_dash() -> void:
 		_refresh_overshield_aura()
 		FX.play_sound("overshield_gain", 0.85)
 		# Run 19 — Shell Cluster duo (Coconut + Grape): mirror-share to Shino.
-		_bea_shell_cluster_mirror_share()
+		# Batch 3 — unified into HeroBase._shell_cluster_mirror_share (hero_id-keyed).
+		_shell_cluster_mirror_share()
 
 
 # Run 28 — Grape+Watermelon Cluster Splash AoE (Bea mirror of Player._apply_cluster_splash).
@@ -2076,19 +2068,8 @@ func _bea_apply_cluster_splash(origin: Vector2) -> void:
 	FX.spawn_burst_particles(origin, col, 8)
 
 
-var _bea_shell_cluster_mirror_pending: bool = false
-func _bea_shell_cluster_mirror_share() -> void:
-	if not RunState.shell_cluster_active():
-		return
-	if _bea_shell_cluster_mirror_pending:
-		return
-	_bea_shell_cluster_mirror_pending = true
-	for p in get_tree().get_nodes_in_group("player"):
-		if p == self:
-			continue
-		if p.has_method("grant_overshield_external"):
-			p.grant_overshield_external(1)
-	_bea_shell_cluster_mirror_pending = false
+# _bea_shell_cluster_mirror_share + _bea_shell_cluster_mirror_pending moved to
+# HeroBase._shell_cluster_mirror_share (Batch 3; hero_id-keyed partner group).
 
 
 # Run 22 — Vital Harvest duo: Player can heal Bea when a crit occurs.
@@ -2137,47 +2118,10 @@ func _tick_bea_juicebox_regen(delta: float) -> void:
 			emit_signal("bea_hp_changed", current_hp, mx)
 
 
-func heal_external(amount: int) -> void:
-	# Run 27f — Poison Apple corrupt: ALL healing blocked.
-	if RunState.bea_has("corrupt_apple"):
-		return
-	# Run 129 — Cold Waters corrupt: HP regen/heals halved (doc §6.3 arm).
-	if RunState.bea_has("corrupt_watermelon") and amount > 0:
-		amount = max(1, int(ceil(float(amount) * 0.5)))
-	amount = max(1, int(round(float(amount) * RunState.get_heal_mult("bea")))) if amount > 0 else amount
-	if amount <= 0:
-		return
-	# Batch 0 ROT-3 — never heal a downed/dead Bea outside the revive pipeline
-	# (parity with Player.gd "Safe for downed state" guard).
-	if current_hp <= 0:
-		return
-	current_hp = min(get_effective_max_hp(), current_hp + amount)
-	emit_signal("bea_hp_changed", current_hp, get_effective_max_hp())
-	FX.spawn_hit_particles(global_position, Color(0.90, 0.60, 0.20, 1.0), 4)
-
-
-func grant_overshield_external(amount: int) -> void:
-	if amount <= 0:
-		return
-	# Run 27f — Cracked Shell corrupt: overshell generation disabled entirely.
-	if RunState.bea_has("corrupt_coconut"):
-		return
-	# Run 27d — Bunker duo cap arm: +1 overshield cap while the duo is active.
-	var cap: int = max(1, RunState.get_overshield_max("bea") + (1 if RunState.is_duo_active("coconut_potato") else 0))   # Run 150b — per-hero cap
-	# Run 27d — Candy Apple duo (Apple+Coconut): overshields gained at full HP
-	# convert into +1 temp max HP (cap +10), decaying 1/min out of combat.
-	if RunState.is_duo_active("apple_coconut") and current_hp >= get_effective_max_hp() \
-	and _candy_apple_bonus < 10:
-		_candy_apple_bonus += 1
-		# Batch 0 ROT-2 — was emit_signal("hp_changed", …): a signal Bea doesn't
-		# declare (runtime no-op; HUD never saw the temp-HP bump).
-		emit_signal("bea_hp_changed", current_hp, get_effective_max_hp())
-		FX.spawn_hit_particles(global_position, Color(0.95, 0.45, 0.45, 0.9), 5)
-	var new_total: int = min(cap, overshield_charges + amount)
-	if new_total > overshield_charges:
-		overshield_charges = new_total
-		_refresh_overshield_aura()
-		FX.play_sound("overshield_gain", 0.7)
+# heal_external, grant_overshield_external moved to HeroBase (Batch 3). The Batch 0
+# ROT-2 (bea_hp_changed emit) and ROT-3 (current_hp<=0 guard) fixes are preserved
+# in the unified base versions (emit via _emit_hp_signal; guard inline). Bea's
+# heal particle FX (Color(0.90,0.60,0.20,1.0), 4) is set via _heal_fx_* in _ready.
 
 
 func _consume_overshield() -> bool:
@@ -2311,20 +2255,7 @@ func _bea_corrupt_hit_procs(body: Node, final_dmg: int, is_finisher: bool) -> vo
 				break
 
 
-# Run 27f — Tears of Restoration Chi siphon (called by StatusComponent).
-func gain_chi_external(amount: int) -> void:
-	if amount <= 0:
-		return
-	current_chi = min(get_effective_max_chi(), current_chi + amount)
-	emit_signal("bea_chi_changed", current_chi, get_effective_max_chi())
-
-
-# Run 27d — Peel Restoration duo (Apple+Banana, default arm): an enemy
-# slip-fall heals this hero 1 HP (1.5s ICD per hero).
-func peel_restoration_slip_credit() -> void:
-	if _peel_resto_icd <= 0.0:
-		_peel_resto_icd = 1.5
-		heal_external(1)
+# gain_chi_external, peel_restoration_slip_credit moved to HeroBase (Batch 3).
 
 
 # Run 27b — Hot Shell (Coconut+Pepper) + Smokestack (Coconut+Onion) duo procs
@@ -2360,50 +2291,7 @@ func _overshield_absorb_duo_procs() -> void:
 				e.get_node("StatusComponent").apply("bash", 0.2, 1)
 
 
-func _fire_nutshell_shockwave() -> void:
-	var radius: float = RunState.NUTSHELL_RADIUS
-	var bash_dur: float = RunState.NUTSHELL_BASH_DURATION
-	# Run 44 — Shellburst damage (see Player.gd note): only if Bea owns the boon.
-	var burst_dmg: int = RunState.get_shellburst_damage() if RunState.bea_has("nutshell") else 0
-	var hit_count: int = 0
-	for e in get_tree().get_nodes_in_group("enemy"):
-		if not is_instance_valid(e):
-			continue
-		if e.has_method("is_alive") and not e.is_alive():
-			continue
-		if global_position.distance_to(e.global_position) > radius:
-			continue
-		if burst_dmg > 0 and e.has_method("take_damage"):
-			e.take_damage(burst_dmg, (e.global_position - global_position).normalized() * 90.0)
-		var es: Variant = e.get("status") if e.has_method("get") else null
-		if es != null and es.has_method("apply"):
-			es.apply("bash", bash_dur)
-			hit_count += 1
-	FX.spawn_burst_particles(global_position, Color(0.95, 0.80, 0.40, 1.0), 20)
-	print("[Bea] Shellburst shockwave: %d enemies bashed (%d dmg each) in %.0fpx." % [hit_count, burst_dmg, radius])
-
-
-func _refresh_overshield_aura() -> void:
-	if _overshield_aura == null:
-		var ring := Line2D.new()
-		ring.name = "OvershieldAura"
-		ring.width = 3.0
-		ring.default_color = Color(0.85, 0.65, 0.30, 0.95)
-		var pts: PackedVector2Array = []
-		var n := 28
-		var r: float = 26.0
-		for i in range(n + 1):
-			var a: float = TAU * float(i) / float(n)
-			pts.append(Vector2(cos(a), sin(a)) * r)
-		ring.points = pts
-		ring.z_index = 5
-		add_child(ring)
-		_overshield_aura = ring
-	if _overshield_aura is Line2D:
-		_overshield_aura.visible = (overshield_charges > 0)
-		var t: float = clamp(float(overshield_charges) / float(max(1, RunState.get_overshield_max("bea"))), 0.0, 1.0)
-		(_overshield_aura as Line2D).default_color = Color(0.85, 0.65, 0.30, 0.55 + 0.40 * t)
-		(_overshield_aura as Line2D).width = 2.0 + 1.5 * t
+# _fire_nutshell_shockwave, _refresh_overshield_aura moved to HeroBase (Batch 3).
 
 
 # Per-hit Bash roll — called for melee enemy hits from katana / naginata strikes.
@@ -2421,19 +2309,7 @@ func _try_apply_coconut_bash(target: Node) -> bool:
 	return true
 
 
-# Shell Breaker — X (naginata / shuriken / Meteor Dive) strikes apply Vulnerable.
-func _try_apply_shell_breaker(target: Node) -> bool:
-	if RunState.shell_breaker_chance <= 0.0:
-		return false
-	if randf() >= RunState.shell_breaker_chance:
-		return false
-	var ts: Variant = target.get("status") if target.has_method("get") else null
-	if ts != null and ts.has_method("apply"):
-		ts.apply("vulnerable", RunState.SHELL_BREAKER_VULN_DUR, 1)
-		FX.play_sound("shell_breaker_crack", 0.85)
-		FX.spawn_hit_particles(target.global_position, Color(0.95, 0.30, 0.85, 1.0), 8)
-		return true
-	return false
+# _try_apply_shell_breaker moved to HeroBase (Batch 3).
 
 
 # Run 17 — Bea's mirror of Player._apply_family_statuses_on_hit. See Player.gd
@@ -5266,8 +5142,7 @@ const HYDRATION_BASE_RATE: float = 0.5
 const HYDRATION_RAMP_RATE: float = 1.5
 const HYDRATION_RAMP_TIME: float = 8.0
 
-var _iron_will_ready: bool = true
-var _iron_will_cd_timer: float = 0.0
+# _iron_will_ready, _iron_will_cd_timer moved to HeroBase (Batch 3).
 
 var _critical_mass_stacks: int = 0
 var _critical_mass_timer: float = 0.0
@@ -5280,14 +5155,13 @@ var _peel_out_timer: float = 0.0
 var _hot_footed_timer: float = 0.0
 var _zip_dash_ms_timer: float = 0.0
 # Run 27b — Ingrained (standing-still) system + on-absorb duo ICDs (Bea-side).
-var _ingrained_time: float = 0.0
+# _ingrained_time moved to HeroBase (Batch 3).
 var _ingrained_last_pos: Vector2 = Vector2.ZERO
 var _deep_roots_timer: float = 0.0
 var _bunker_timer: float = 0.0
 var _hot_shell_icd: float = 0.0
 var _smokestack_icd: float = 0.0
-var _peel_resto_icd: float = 0.0
-var _candy_apple_bonus: int = 0      # Run 27d — Candy Apple temp max HP (cap +10)
+# _peel_resto_icd, _candy_apple_bonus moved to HeroBase (Batch 3).
 var _candy_apple_decay: float = 0.0  # decays 1/min while out of combat
 # Run 60 — Tremor Walk (Potato passive) Bea-side: cracked-earth trail on movement.
 var _tremor_walk_timer: float = 0.0

@@ -34,7 +34,7 @@ const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glid
 # --- Tunable stats (placeholder — balance in playtest) ---
 @export var move_speed: float = 220.0
 @export var max_hp: int = 100
-var current_hp: int = 100
+# current_hp moved to HeroBase (Batch 3); reset to max_hp at _ready top.
 
 # Tracks the effective max HP at the last apply_runstate_modifiers() call so
 # subsequent boon picks heal by the DELTA, not by the whole bonus. Without
@@ -85,7 +85,7 @@ var _burrow_mound: Node2D   = null            # placeholder dirt-mound visual no
 
 # --- Chi (GDD §8.3.2 — universal Chi, both characters share gain rules) ---
 const MAX_CHI: int = 100
-var current_chi: int = 0
+# current_chi moved to HeroBase (Batch 3).
 const CHI_PER_DAMAGE_DEALT: float = 0.5    # per point of damage dealt
 const CHI_PER_DAMAGE_TAKEN: float = 1.5    # per point of damage taken (higher to reward aggression)
 
@@ -189,7 +189,7 @@ var _hot_footed_timer: float = 0.0
 var _pyromania_streak: int = 0
 var _pyromania_last_hit: float = -10.0
 # Run 27b — Ingrained (standing-still) system + on-absorb duo ICDs.
-var _ingrained_time: float = 0.0
+# _ingrained_time moved to HeroBase (Batch 3).
 var _ingrained_last_pos: Vector2 = Vector2.ZERO
 # Run 59 — Tremor Walk (Potato passive): Cracked Soil patches while moving / pulses while Ingrained.
 var _tremor_walk_timer: float = 0.0
@@ -202,8 +202,7 @@ var _deep_roots_timer: float = 0.0
 var _bunker_timer: float = 0.0
 var _hot_shell_icd: float = 0.0
 var _smokestack_icd: float = 0.0
-var _peel_resto_icd: float = 0.0
-var _candy_apple_bonus: int = 0      # Run 27d — Candy Apple temp max HP (cap +10)
+# _peel_resto_icd, _candy_apple_bonus moved to HeroBase (Batch 3).
 var _candy_apple_decay: float = 0.0  # decays 1/min while out of combat
 var _static_charge_count: int = 0    # Run 27e — Static Charge every-3rd-ranged-hit
 var _heirloom_timer: float = 0.0     # Run 27e — Heirloom follower regen (1 HP/2s)
@@ -219,8 +218,7 @@ var _critical_mass_stacks: int = 0
 var _critical_mass_timer: float = 0.0   # duration of current top stack
 
 # --- Iron Will (Broccoli) — CC defy: immune to next CC every 10s ---
-var _iron_will_ready: bool = true
-var _iron_will_cd_timer: float = 0.0
+# _iron_will_ready, _iron_will_cd_timer moved to HeroBase (Batch 3).
 
 # --- Battle Shell (Coconut) — 1 overshield on KO or X finisher ---
 var _battle_shell_timer: float = 0.0   # 3s duration window
@@ -482,8 +480,7 @@ var status: StatusComponent = null
 # Charges absorb the next incoming hit completely. Granted on dash by the
 # Overshield boon; cap is RunState.overshield_max. When a charge breaks,
 # Nutshell (if taken) fires a Bash AoE on nearby enemies.
-var overshield_charges: int = 0
-var _overshield_aura: Node2D = null   # lazy visual halo (Line2D ring)
+# overshield_charges, _overshield_aura moved to HeroBase (Batch 3).
 # Adamantium Husk (GDD v028): each charge blocks 2 hits. Tracks remaining
 # hits the current top charge can absorb before breaking (reset on new grant).
 var _adamantium_hits_on_current_charge: int = 2
@@ -1449,30 +1446,21 @@ func _get_max_dash_charges() -> int:
 # Run 15 — Coconut Hard Landing: stun-immune while charging.
 # Iron Will (Broccoli): defy the next CC every 10s.
 # StatusComponent calls this before applying any new status.
-func can_receive_status(id: String) -> bool:
-	var cc_ids: Array = ["bash", "frozen", "root", "stagger", "slippery", "greased"]
-	# Hulk Smash: full super-armor during any charge or release state.
-	if RunState.shino_has("hulk_smash") and id in cc_ids:
-		if state in [State.CHARGING, State.CHARGED, State.FLURRYING, State.CRANE_KICKING, State.BEAMING]:
-			return false
-	# Run 27b — Heavy Stance: stagger immunity while Ingrained (1.5s+ still).
-	if RunState.shino_has("heavy_stance") and _ingrained_time >= RunState.INGRAINED_THRESHOLD and id in ["stagger", "bash"]:
-		return false
-	# Run 27f — Burnout corrupt: 50% chance to fully resist any incoming CC.
-	if RunState.shino_has("corrupt_broccoli") and id in cc_ids and randf() < 0.50:
-		return false
-	# Hard Landing: immune to bash while charging.
-	if RunState.shino_has("hard_landing"):
-		if id == "bash" and (state == State.CHARGING or state == State.CHARGED):
-			return false
-	# Iron Will: defy next CC every 10s.
-	if RunState.shino_has("iron_will") and _iron_will_ready and id in ["bash", "frozen", "root", "stagger"]:
-		_iron_will_ready = false
-		_iron_will_cd_timer = 10.0
-		FX.spawn_hit_particles(global_position, Color(0.25, 0.70, 0.25, 0.90), 8)
-		FX.play_sound("iron_will_proc", 0.85)
-		return false
-	return true
+# can_receive_status moved to HeroBase (Batch 3). Per-hero hooks it calls:
+func _hero_has(id: String) -> bool:
+	return RunState.shino_has(id)
+
+func _emit_hp_signal() -> void:
+	emit_signal("hp_changed", current_hp, get_effective_max_hp())
+
+func _emit_chi_signal() -> void:
+	emit_signal("chi_changed", current_chi, get_effective_max_chi())
+
+func _in_charge_or_release_state() -> bool:
+	return state in [State.CHARGING, State.CHARGED, State.FLURRYING, State.CRANE_KICKING, State.BEAMING]
+
+func _is_charging_state() -> bool:
+	return state == State.CHARGING or state == State.CHARGED
 
 
 # -------------------------------------------------------
@@ -1495,65 +1483,10 @@ func _grant_overshield_on_dash() -> void:
 		_shell_cluster_mirror_share()
 
 
-# Run 19 — Shell Cluster mirror-share. When Shino gains an overshield, Bea
-# also gains 1 (capped by her overshield cap). Looped guard via _mirror_pending
-# so the partner doesn't recursively grant back.
-var _shell_cluster_mirror_pending: bool = false
-func _shell_cluster_mirror_share() -> void:
-	if not RunState.shell_cluster_active():
-		return
-	if _shell_cluster_mirror_pending:
-		return
-	_shell_cluster_mirror_pending = true
-	for bea in get_tree().get_nodes_in_group("bea"):
-		if bea == self:
-			continue
-		if bea.has_method("grant_overshield_external"):
-			bea.grant_overshield_external(1)
-	_shell_cluster_mirror_pending = false
-
-
-# Run 23 — external heal hook (Apple Juice / future co-op heals).
-# Mirrors BeaAI.gd:heal_external. Safe for downed state — returns 0 if dead.
-func heal_external(amount: int) -> void:
-	# Run 27f — Poison Apple corrupt: ALL healing blocked.
-	if RunState.shino_has("corrupt_apple"):
-		return
-	# Run 129 — Cold Waters corrupt: HP regen/heals halved (doc §6.3 arm).
-	if RunState.shino_has("corrupt_watermelon") and amount > 0:
-		amount = max(1, int(ceil(float(amount) * 0.5)))
-	amount = max(1, int(round(float(amount) * RunState.get_heal_mult("shino")))) if amount > 0 else amount
-	if amount <= 0:
-		return
-	if current_hp <= 0:
-		return
-	var max_hp_eff: int = get_effective_max_hp() if has_method("get_effective_max_hp") else max_hp
-	current_hp = min(max_hp_eff, current_hp + amount)
-	emit_signal("hp_changed", current_hp, max_hp_eff)
-	FX.spawn_hit_particles(global_position, Color(0.95, 0.55, 0.20, 1.0), 6)
-
-
-# Run 19 — external overshield grant (Shell Cluster mirror + future hooks).
-func grant_overshield_external(amount: int) -> void:
-	if amount <= 0:
-		return
-	# Run 27f — Cracked Shell corrupt: overshell generation disabled entirely.
-	if RunState.shino_has("corrupt_coconut"):
-		return
-	# Run 27d — Bunker duo cap arm: +1 overshield cap while the duo is active.
-	var cap: int = max(1, RunState.get_overshield_max("shino") + (1 if RunState.is_duo_active("coconut_potato") else 0))   # Run 150b — per-hero cap
-	# Run 27d — Candy Apple duo (Apple+Coconut): overshields gained at full HP
-	# convert into +1 temp max HP (cap +10), decaying 1/min out of combat.
-	if RunState.is_duo_active("apple_coconut") and current_hp >= get_effective_max_hp() \
-	and _candy_apple_bonus < 10:
-		_candy_apple_bonus += 1
-		emit_signal("hp_changed", current_hp, get_effective_max_hp())
-		FX.spawn_hit_particles(global_position, Color(0.95, 0.45, 0.45, 0.9), 5)
-	var new_total: int = min(cap, overshield_charges + amount)
-	if new_total > overshield_charges:
-		overshield_charges = new_total
-		_refresh_overshield_aura()
-		FX.play_sound("overshield_gain", 0.7)
+# _shell_cluster_mirror_share, heal_external, grant_overshield_external moved to
+# HeroBase (Batch 3). Mirror-share is now hero_id-parameterized (Shino → "bea"
+# group; Bea → "player" group). Shino's dash grant still calls the inherited
+# _shell_cluster_mirror_share().
 
 
 # Run 19 — Aimed Guard duo (Carrot + Coconut): crits grant 1 overshield with a 2s ICD.
@@ -1633,21 +1566,7 @@ func _spawn_rampart_wall(pos: Vector2) -> void:
 	)
 
 
-# Run 27f — Tears of Restoration (Onion passive): Chi siphon from Poison ticks.
-func gain_chi_external(amount: int) -> void:
-	if amount <= 0:
-		return
-	current_chi = min(get_effective_max_chi(), current_chi + amount)
-	emit_signal("chi_changed", current_chi, get_effective_max_chi())
-
-
-# Run 27d — Peel Restoration duo (Apple+Banana, default arm): an enemy
-# slip-fall heals this hero 1 HP (1.5s ICD per hero). Called by the slipping
-# enemy's StatusComponent.
-func peel_restoration_slip_credit() -> void:
-	if _peel_resto_icd <= 0.0:
-		_peel_resto_icd = 1.5
-		heal_external(1)
+# gain_chi_external, peel_restoration_slip_credit moved to HeroBase (Batch 3).
 
 
 # Run 27b — Hot Shell (Coconut+Pepper) + Smokestack (Coconut+Onion) duo procs
@@ -1705,56 +1624,7 @@ func _try_hulk_smash(origin: Vector2) -> void:
 	FX.play_sound("hulk_smash", 1.0)
 
 
-func _fire_nutshell_shockwave() -> void:
-	var radius: float = RunState.NUTSHELL_RADIUS
-	var bash_dur: float = RunState.NUTSHELL_BASH_DURATION
-	# Run 44 — Shellburst (doc §8.2 p5): the break also deals flat rarity-scaled
-	# damage. Damage only applies when this hero owns the boon — the Slip 'n
-	# Shell duo reuses this shockwave but stays CC-only per its doc entry.
-	var burst_dmg: int = RunState.get_shellburst_damage() if RunState.shino_has("nutshell") else 0
-	var hit_count: int = 0
-	for e in get_tree().get_nodes_in_group("enemy"):
-		if not is_instance_valid(e):
-			continue
-		if e.has_method("is_alive") and not e.is_alive():
-			continue
-		if global_position.distance_to(e.global_position) > radius:
-			continue
-		if burst_dmg > 0 and e.has_method("take_damage"):
-			e.take_damage(burst_dmg, (e.global_position - global_position).normalized() * 90.0)
-		# Apply Bash via status if available (skips bosses' super-armor).
-		var es: Variant = e.get("status") if e.has_method("get") else null
-		if es != null and es.has_method("apply"):
-			es.apply("bash", bash_dur)
-			hit_count += 1
-	FX.spawn_burst_particles(global_position, Color(0.95, 0.80, 0.40, 1.0), 20)
-	print("[Player] Shellburst shockwave: %d enemies bashed (%d dmg each) in %.0fpx." % [hit_count, burst_dmg, radius])
-
-
-func _refresh_overshield_aura() -> void:
-	# Lightweight visual: a thin tan/brown ring around the player that
-	# brightens with charge count. Lazy-init Line2D.
-	if _overshield_aura == null:
-		var ring := Line2D.new()
-		ring.name = "OvershieldAura"
-		ring.width = 3.0
-		ring.default_color = Color(0.85, 0.65, 0.30, 0.95)
-		var pts: PackedVector2Array = []
-		var n := 28
-		var r: float = 26.0
-		for i in range(n + 1):
-			var a: float = TAU * float(i) / float(n)
-			pts.append(Vector2(cos(a), sin(a)) * r)
-		ring.points = pts
-		ring.z_index = 5
-		add_child(ring)
-		_overshield_aura = ring
-	if _overshield_aura is Line2D:
-		_overshield_aura.visible = (overshield_charges > 0)
-		# Color intensity ramps with charges held.
-		var t: float = clamp(float(overshield_charges) / float(max(1, RunState.get_overshield_max("shino"))), 0.0, 1.0)
-		(_overshield_aura as Line2D).default_color = Color(0.85, 0.65, 0.30, 0.55 + 0.40 * t)
-		(_overshield_aura as Line2D).width = 2.0 + 1.5 * t
+# _fire_nutshell_shockwave, _refresh_overshield_aura moved to HeroBase (Batch 3).
 
 
 # -------------------------------------------------------
@@ -2975,20 +2845,7 @@ func _try_apply_coconut_bash(target: Node) -> bool:
 	return true
 
 
-# Coconut Shell Breaker (Run 15) — X (secondary) attacks roll to apply
-# Vulnerable (+25% dmg taken / 5s, stacks via StatusComponent's "stack" policy).
-func _try_apply_shell_breaker(target: Node) -> bool:
-	if RunState.shell_breaker_chance <= 0.0:
-		return false
-	if randf() >= RunState.shell_breaker_chance:
-		return false
-	var ts: Variant = target.get("status") if target.has_method("get") else null
-	if ts != null and ts.has_method("apply"):
-		ts.apply("vulnerable", RunState.SHELL_BREAKER_VULN_DUR, 1)
-		FX.play_sound("shell_breaker_crack", 0.85)
-		FX.spawn_hit_particles(target.global_position, Color(0.95, 0.30, 0.85, 1.0), 8)
-		return true
-	return false
+# _try_apply_shell_breaker moved to HeroBase (Batch 3).
 
 
 # Run 17 — Family status application on hit. Pragmatic gate: any boon owned
