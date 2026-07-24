@@ -2621,11 +2621,7 @@ var member_visits: Dictionary = {}       # per-wanderer chats (drives member-lin
 var full_ending_beaten: bool = false   # persistent — set on Shadow Sensei Z victory
 
 func town_visual_tier() -> int:
-	if full_ending_beaten and sensei_lore_tier >= 6:
-		return 2
-	if sensei_lore_tier >= 3:
-		return 1
-	return 0
+	return DayState.town_visual_tier()   # P2-B4a: body → scripts/DayState.gd
 
 # Transient (NOT saved) — day-world routing + run guard.
 var _karma_banked_this_run: bool = false
@@ -2638,29 +2634,15 @@ var day_spawn_hint: String = ""    # "from_town" / "from_home" / "from_biome_<id
 # boons_taken. Both call sites: RunComplete._finalize_run() and
 # Player._reload_arena1(). Corrupt boons bank nothing.
 func bank_run_karma() -> void:
-	if _karma_banked_this_run:
-		return
-	_karma_banked_this_run = true
-	var gained: Dictionary = {}
-	for id in boons_taken:
-		var fam: String = String(BOON_POOL.get(id, {}).get("family", ""))
-		if fam == "" or fam == "Corrupt":
-			continue
-		gained[fam] = int(gained.get(fam, 0)) + 1
-	for fam in gained.keys():
-		var cur: int = int(karma_banked.get(fam, 0))
-		var cap: int = karma_needed_for_tier(get_family_tier(fam))
-		karma_banked[fam] = mini(cur + int(gained[fam]), cap)
-	if not gained.is_empty():
-		print("[RunState] Karma banked (hidden): %s" % str(gained))
+	DayState.bank_run_karma()   # P2-B4a: body → scripts/DayState.gd
 
 
 func get_family_tier(fam: String) -> int:
-	return clampi(int(family_tier.get(fam, 0)), 0, FAMILY_TIER_MAX)
+	return DayState.get_family_tier(fam)   # P2-B4a: body → scripts/DayState.gd
 
 
 func has_banked_karma(fam: String) -> bool:
-	return int(karma_banked.get(fam, 0)) > 0
+	return DayState.has_banked_karma(fam)   # P2-B4a: body → scripts/DayState.gd
 
 
 # Deposit ALL banked karma for a family (the elder chat). Returns
@@ -2668,27 +2650,7 @@ func has_banked_karma(fam: String) -> bool:
 # One tier advance max per deposit, no progress carry-over past a tier-up
 # (Townsfolk §2.1). At Restored, karma is still absorbed as goodwill.
 func deposit_karma(fam: String) -> Dictionary:
-	var amt: int = int(karma_banked.get(fam, 0))
-	var out: Dictionary = {"deposited": amt, "tier_up": false, "new_tier": get_family_tier(fam)}
-	if amt <= 0:
-		return out
-	karma_banked[fam] = 0
-	var tier: int = get_family_tier(fam)
-	if tier >= FAMILY_TIER_MAX:
-		return out
-	var needed: int = karma_needed_for_tier(tier)
-	var prog: int = int(karma_progress.get(fam, 0)) + amt
-	if prog >= needed:
-		tier += 1
-		prog = 0
-		family_tier[fam] = tier
-		out["tier_up"] = true
-		out["new_tier"] = tier
-		print("[RunState] The %s family healed to %d." % [fam, tier])
-	karma_progress[fam] = prog
-	# Run 142 — re-evaluate Sensei's lore tier whenever karma is deposited
-	update_sensei_lore_from_healing()
-	return out
+	return DayState.deposit_karma(fam)   # P2-B4a: body → scripts/DayState.gd
 
 
 # ---------------------------------------------------------------------------
@@ -2702,16 +2664,7 @@ func deposit_karma(fam: String) -> Dictionary:
 const _HEALING_TIER_WEIGHT = BoonDBClass._HEALING_TIER_WEIGHT
 
 func island_healing_score() -> float:
-	var total: float = 0.0
-	for fam in FAMILIES:
-		var t: int = get_family_tier(fam)
-		total += float(_HEALING_TIER_WEIGHT[t])
-		# Add fractional credit for progress toward the NEXT tier
-		if t < FAMILY_TIER_MAX:
-			var prog: int = int(karma_progress.get(fam, 0))
-			var needed: int = karma_needed_for_tier(t)
-			total += float(prog) / float(needed) * 0.5  # up to 0.5 bonus
-	return total
+	return DayState.island_healing_score()   # P2-B4a: body → scripts/DayState.gd
 
 
 # Sensei lore tier thresholds keyed off island_healing_score().
@@ -2725,22 +2678,12 @@ func island_healing_score() -> float:
 const SENSEI_LORE_THRESHOLDS = BoonDBClass.SENSEI_LORE_THRESHOLDS
 
 func compute_sensei_lore_tier() -> int:
-	if sensei_lore_tier < 1:
-		return 0  # haven't even done the town visit yet
-	var score: float = island_healing_score()
-	var best: int = 1  # minimum = tier 1 (post-town-visit)
-	for i in range(2, SENSEI_LORE_THRESHOLDS.size()):
-		if score >= float(SENSEI_LORE_THRESHOLDS[i]):
-			best = i
-	return best
+	return DayState.compute_sensei_lore_tier()   # P2-B4a: body → scripts/DayState.gd
 
 
 # Call after any karma deposit or tier-up to see if Sensei has new dialogue.
 func update_sensei_lore_from_healing() -> void:
-	var computed: int = compute_sensei_lore_tier()
-	if computed > sensei_lore_tier:
-		sensei_lore_tier = computed
-		print("[RunState] Sensei lore tier advanced to %d (healing score: %.1f)" % [computed, island_healing_score()])
+	DayState.update_sensei_lore_from_healing()   # P2-B4a: body → scripts/DayState.gd
 
 
 # ============================================================
