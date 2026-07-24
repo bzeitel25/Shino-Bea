@@ -81,6 +81,20 @@ func create_new_slot(slot: int, save_name: String) -> void:
 		# New file → no accumulated sparks or sensei upgrades.
 		if "dragon_souls" in rs:
 			rs.dragon_souls = 0
+		# New file → restart the story from the top: replay the intro tutorial
+		# dream. tutorial_completed / tutorial_room are PERSISTENT story fields that
+		# reset_run() deliberately preserves (so run-loops within a save keep the
+		# tutorial done), so a brand-new file must clear them explicitly here — else
+		# the singleton's stale value from a previously-loaded save leaks in and
+		# SaveFileSelect routes straight to the Dojo, skipping the tutorial.
+		if "tutorial_completed" in rs:
+			rs.tutorial_completed = false
+		if "tutorial_room" in rs:
+			rs.tutorial_room = 1
+		# Also clear any stale resume target so the new file can't resume into a
+		# previous save's arena/Dojo ahead of the tutorial check.
+		if "resume_scene_path" in rs:
+			rs.resume_scene_path = ""
 		for field in ["sensei_damage_pct", "sensei_dr_pct", "sensei_extra_dash",
 				"sensei_extra_dd", "sensei_chi_regen", "sensei_hp_pct",
 				"sensei_crit_pct", "sensei_speed_pct", "sensei_rarity_ranks",
