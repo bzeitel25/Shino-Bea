@@ -619,6 +619,16 @@ func _enter_downed_state() -> void:
 	_set_state_downed()
 	velocity = Vector2.ZERO
 	rez_fill = 0.0
+	# Bugfix 2026-07-23 (Bea stuck-after-rez) — cancel any lingering DD revive HoT
+	# on the way down. A downed body has no active regen; leaving the HoT live let
+	# _tick_dd_hot (Bea's DOWNED block) resurrect its HP above 0 and strand her in
+	# State.DOWNED at positive HP ("semi-alive"). Belt-and-suspenders with the
+	# _tick_dd_hot downed-guard. A genuine DD team-revive is unaffected: RunState
+	# resolves it from its OWN dd-payload pool and revive_from_dd re-sets these
+	# fields AND stands the hero up in the same call.
+	_dd_hot_remaining = 0.0
+	_dd_hot_pct_per_sec = 0.0
+	_dd_hot_accum = 0.0
 	# Per-hero combat teardown (attack combo / weapons / charge aim-lines).
 	_cleanup_combat_on_downed()
 	if _hitfx:
@@ -1036,6 +1046,17 @@ func add_frost_stack(n: int = 1) -> void:
 # DD (Deadly Dream) team-revive HoT — heals a % of max HP/sec for its duration.
 # Fractional HP accumulates across frames so small %/s ticks resolve cleanly.
 func _tick_dd_hot(delta: float) -> void:
+	# Bugfix 2026-07-23 (Bea stuck-after-rez) — a DOWNED body must NEVER heal.
+	# Bea's DOWNED-state block in _physics_process calls this every frame (Shino
+	# returns before his _tick_dd_hot, so only she was affected). Without this
+	# guard, a DD revive HoT left running on a hero who is downed AGAIN heals her
+	# body's HP back above 0 while she stays in State.DOWNED — the "semi-alive"
+	# softlock (downed wiggle keeps playing, AI/_ai_tick never runs, swap-to-her
+	# is refused, HUD climbs to e.g. 49/80). Only a real revive (revive_from_dd /
+	# revive_from_partner) may restore a downed hero's HP. Does NOT weaken the
+	# downed=zero-DAMAGE lock (that lives in take_damage) — this is heal-side only.
+	if _is_state_downed():
+		return
 	if _dd_hot_remaining <= 0.0 or _dd_hot_pct_per_sec <= 0.0:
 		return
 	_dd_hot_remaining -= delta
