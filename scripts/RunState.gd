@@ -2400,96 +2400,17 @@ var finisher_crit_chance_bonus: float = 0.0   # applied per-roll, not persistent
 # Keen Eye (+15%/+10% on primary), Sharpened Tip (+25%/+20% on heavy),
 # Bullseye (+20%/+30% on ranged).
 func roll_crit_mult(attack_type: String = "", who: String = "shino") -> float:
-	last_crit_result = false
-	_set_crit_tier(0)   # Run 127 — reset display tier for this hit
-
-	# Chaos Carrot (corrupt): 50% flat crit, but crit damage = 1.0 (no bonus).
-	# Run 139 — taker only: the corrupt flips crits ONLY for the ninja who took it.
-	if char_has("corrupt_carrot", who):
-		finisher_crit_chance_bonus = 0.0
-		if randf() < 0.50:
-			last_crit_result = true
-			_set_crit_tier(1)
-			return 1.0   # crits still "fire" (for debuff/buff callbacks) but no dmg boost
-		return 1.0
-
-	# Hawkeye level mult: if leveled, crit damage bonus scales up.
-	# (Rarity already applied at pick-time; only DF levels scale here.)
-	var hawk_lvl: float = get_boon_level_mult("hawkeye") if hawkeye_taken else 1.0
-	var effective_crit_dmg: float = crit_damage_bonus * hawk_lvl
-
-	# Per-attack-type crit bonuses from Keen Eye / Sharpened Tip / Bullseye.
-	var type_chance_add: float = 0.0
-	match attack_type:
-		"primary":
-			if keen_eye_taken:
-				type_chance_add    += 0.15
-				effective_crit_dmg += 0.10
-		"heavy":
-			if sharpened_tip_taken:
-				type_chance_add    += 0.25
-				effective_crit_dmg += 0.20
-		"ranged":
-			if bullseye_taken:
-				type_chance_add    += 0.20
-				effective_crit_dmg += 0.30
-
-	# Run 27 — Heavy Crit duo (Broccoli+Carrot): all charge attacks are
-	# guaranteed crits. (Mega-Crit excess-chance conversion arm deferred.)
-	if attack_type == "charge" and is_duo_active("broccoli_carrot"):
-		force_next_crit = true
-
-	# Run 27b — Headshot duo (Carrot+Potato): while Ingrained (2s+ still),
-	# all attacks gain +25% crit chance and +25% crit damage.
-	var _ingr: bool = shino_ingrained if who == "shino" else bea_ingrained
-	if _ingr and is_duo_active("carrot_potato"):
-		type_chance_add    += 0.25
-		effective_crit_dmg += 0.25
-
-	# Run 139 — Poison Apple: converted max-HP gains add flat crit chance AND
-	# flat crit damage for the taker.
-	var _pa_crit: float = get_poison_apple_conversion_pct(who)
-	if _pa_crit > 0.0:
-		type_chance_add    += _pa_crit
-		effective_crit_dmg += _pa_crit
-
-	# 1. Forced-crit gate (Opening Strike, Golden Carrot finisher).
-	if force_next_crit:
-		force_next_crit = false
-		last_crit_result = true
-		_set_crit_tier(2)   # Run 127 — guaranteed crit = Mega-Crit (RED number)
-		return 1.5 + effective_crit_dmg
-
-	# 2. Chance-based crit — base crit_chance + finisher bonus + Sensei Hunter's Eye + type bonus.
-	var effective_chance: float = crit_chance + finisher_crit_chance_bonus + sensei_crit_pct + type_chance_add \
-		+ get_burning_aim_crit_chance_bonus()   # Run 27 — Burning Aim arm 2
-	finisher_crit_chance_bonus = 0.0   # consume bonus after each roll
-	if effective_chance > 0.0 and randf() < effective_chance:
-		last_crit_result = true
-		_set_crit_tier(1)   # Run 127 — rolled crit (ORANGE number)
-		return 1.5 + effective_crit_dmg
-
-	return 1.0
+	return BoonEffects.roll_crit_mult(attack_type, who)
 
 
 # ---------------------------------------------------------------------------
 # Grape family helpers (Combo Counter scaling).
 # ---------------------------------------------------------------------------
 func get_combo_master_mult(combo_count: int, who: String = "shino") -> float:
-	# Per-character: only grant the combo scaling to the ninja who picked Combo Master.
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("combo_master" in s):
-		return 1.0
-	# Run 40 — rarity x level scales the BONUS (+1%/hit base), not the whole mult.
-	return 1.0 + 0.01 * float(combo_count) * get_boon_effect_mult("combo_master")
+	return BoonEffects.get_combo_master_mult(combo_count, who)
 
 func get_noble_rot_mult(combo_count: int, is_finisher: bool, who: String = "shino") -> float:
-	# Per-character: only grant Noble Rot bonus to the ninja who picked it.
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("noble_rot" in s) or not is_finisher:
-		return 1.0
-	# Run 40 — rarity x level scales the BONUS portion.
-	return 1.0 + 0.01 * float(combo_count) * get_boon_effect_mult("noble_rot")
+	return BoonEffects.get_noble_rot_mult(combo_count, is_finisher, who)
 
 
 # ---------------------------------------------------------------------------
@@ -2497,44 +2418,14 @@ func get_noble_rot_mult(combo_count: int, is_finisher: bool, who: String = "shin
 # Callers MUST pass is_primary=true ONLY for primary (Y) attack damage.
 # ---------------------------------------------------------------------------
 func get_full_bloom_mult(hp_frac: float, is_primary: bool = false, who: String = "shino") -> float:
-	# Per-character: Full Bloom only benefits the ninja who picked it.
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("full_bloom_apple" in s or "full_bloom" in s) or not is_primary:
-		return 1.0
-	if hp_frac < 0.80:
-		return 1.0
-	# Run 40 — base +15%, bonus scaled by rarity x level.
-	return 1.0 + 0.15 * get_boon_effect_mult("full_bloom_apple")
+	return BoonEffects.get_full_bloom_mult(hp_frac, is_primary, who)
 
 
 # ---------------------------------------------------------------------------
 # Apple Ripened Core + Heart of the Orchard — global, HP-fraction-driven.
 # ---------------------------------------------------------------------------
 func get_apple_hp_tier_mult(hp_frac: float, who: String = "shino") -> float:
-	# Per-character: HP-tier bonuses only scale for the ninja who picked these.
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	# Run 27f — Poison Apple corrupt: always-full-HP state — top tier permanent.
-	# Run 139 — taker only (was global: either ninja's corrupt pinned both).
-	var _pa: bool = "corrupt_apple" in s
-	if _pa:
-		hp_frac = 1.0
-	var mult: float = 1.0
-	# Run 131 — Poison Apple corrupt: "Ripened Core always active" even when the
-	# ripened_core boon itself was never picked. Combined with hp_frac pinned to
-	# 1.0 above, this grants the permanent +30% top-tier damage the desc promises.
-	if "ripened_core" in s or _pa:
-		if hp_frac >= 1.0 - 0.001:
-			mult *= 1.30
-		elif hp_frac >= 0.80:
-			mult *= 1.20
-		elif hp_frac >= 0.50:
-			mult *= 1.10
-	if "heart_of_the_orchard" in s:
-		if hp_frac >= 1.0 - 0.001:
-			mult *= 3.0
-		elif hp_frac >= 0.80:
-			mult *= 2.0
-	return mult
+	return BoonEffects.get_apple_hp_tier_mult(hp_frac, who)
 
 
 # ---------------------------------------------------------------------------
@@ -2542,12 +2433,7 @@ func get_apple_hp_tier_mult(hp_frac: float, who: String = "shino") -> float:
 # Spec §8.3: Y slot — "+15% damage AND +10% atk speed to primary attacks".
 # ---------------------------------------------------------------------------
 func get_heavy_stalk_mult(is_primary: bool = false, who: String = "shino") -> float:
-	# Per-character: Heavy Stalk only buffs the ninja who picked it.
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("heavy_stalk" in s) or not is_primary:
-		return 1.0
-	# Run 40 — base +15%, bonus scaled by rarity x level.
-	return 1.0 + 0.15 * get_boon_effect_mult("heavy_stalk")
+	return BoonEffects.get_heavy_stalk_mult(is_primary, who)
 
 
 # ---------------------------------------------------------------------------
@@ -2562,14 +2448,7 @@ const STATUS_SLOT_DMG_BONUS = BoonDBClass.STATUS_SLOT_DMG_BONUS
 const STATUS_SLOT_DMG_BOONS = BoonDBClass.STATUS_SLOT_DMG_BOONS
 
 func get_status_slot_dmg_mult(who: String, slot: String) -> float:
-	if slot == "":
-		return 1.0
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	for id in STATUS_SLOT_DMG_BOONS.keys():
-		if STATUS_SLOT_DMG_BOONS[id] == slot and (id in s):
-			var base: float = float(STATUS_SLOT_DMG_BONUS.get(slot, 0.0))
-			return 1.0 + base * get_boon_effect_mult(id)
-	return 1.0
+	return BoonEffects.get_status_slot_dmg_mult(who, slot)
 
 
 # ---------------------------------------------------------------------------
@@ -2579,11 +2458,7 @@ func get_status_slot_dmg_mult(who: String, slot: String) -> float:
 # ---------------------------------------------------------------------------
 const SMASH_ZONE_PX_PER_M = BoonDBClass.SMASH_ZONE_PX_PER_M
 func get_smash_zone_mult(who: String, dist_px: float) -> float:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("smash_zone" in s):
-		return 1.0
-	var m: float = dist_px / SMASH_ZONE_PX_PER_M
-	return 1.0 + clampf((5.0 - m) * 0.10, 0.0, 0.50)
+	return BoonEffects.get_smash_zone_mult(who, dist_px)
 
 
 # ---------------------------------------------------------------------------
@@ -2593,15 +2468,7 @@ func get_smash_zone_mult(who: String, dist_px: float) -> float:
 # ---------------------------------------------------------------------------
 var _drupe_ready_msec: Dictionary = {"shino": 0, "bea": 0}
 func try_drupe_guard(who: String) -> float:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("drupe_guard" in s):
-		return 0.0
-	var now: int = Time.get_ticks_msec()
-	if now < int(_drupe_ready_msec.get(who, 0)):
-		return 0.0
-	var cd: float = maxf(4.0, 10.0 - 2.0 * float(get_boon_level("drupe_guard") - 1))
-	_drupe_ready_msec[who] = now + int(cd * 1000.0)
-	return 1.5
+	return BoonEffects.try_drupe_guard(who)
 
 
 # ---------------------------------------------------------------------------
@@ -2610,50 +2477,24 @@ func try_drupe_guard(who: String) -> float:
 # small zap damage + ~0.3s ministun instead. Caller applies the CC.
 # ---------------------------------------------------------------------------
 func roll_shocking_return(who: String) -> bool:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("shocking_return" in s):
-		return false
-	return randf() < 0.20
+	return BoonEffects.roll_shocking_return(who)
 
 
 # ---------------------------------------------------------------------------
 # Broccoli Stalk of Might — +5% damage per Broccoli boon owned.
 # ---------------------------------------------------------------------------
 func get_stalk_of_might_mult() -> float:
-	if not boons_taken.has("stalk_of_might"):
-		return 1.0
-	return 1.0 + 0.05 * float(broccoli_boons_taken)
+	return BoonEffects.get_stalk_of_might_mult()
 
 
 # ---------------------------------------------------------------------------
 # Broccoli Green Rage — always-on tiered rage (replaces, doesn't stack).
 # ---------------------------------------------------------------------------
 func get_green_rage_mult(hp_frac: float, who: String = "shino") -> float:
-	# Per-character: Green Rage only buffs the ninja who picked it.
-	# Run 27f — Burnout corrupt: all rage ramps locked at max permanently.
-	# Run 139 — taker only.
-	if char_has("corrupt_broccoli", who):
-		hp_frac = 0.0
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("green_rage" in s):
-		return 1.0
-	# Run 40 — tier bonuses (+50% / +30%) scaled by rarity x level.
-	var eff_mult: float = get_boon_effect_mult("green_rage")
-	if hp_frac <= 0.25:
-		return 1.0 + 0.50 * eff_mult
-	if hp_frac <= 0.50:
-		return 1.0 + 0.30 * eff_mult
-	return 1.0
+	return BoonEffects.get_green_rage_mult(hp_frac, who)
 
 func get_green_rage_dr(hp_frac: float, who: String = "shino") -> float:
-	# Returns the DR multiplier (0.75 = -25% damage taken) when in <25% tier.
-	# Per-character: only the ninja who picked Green Rage gets the DR.
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if not ("green_rage" in s):
-		return 1.0
-	if hp_frac <= 0.25:
-		return 0.75
-	return 1.0
+	return BoonEffects.get_green_rage_dr(hp_frac, who)
 
 
 # ---------------------------------------------------------------------------
@@ -2661,11 +2502,7 @@ func get_green_rage_dr(hp_frac: float, who: String = "shino") -> float:
 # Caller passes target_hp_frac.
 # ---------------------------------------------------------------------------
 func get_crushing_blow_mult(target_hp_frac: float) -> float:
-	if not crushing_blow_taken:
-		return 1.0
-	if target_hp_frac >= 0.30:
-		return 1.0
-	return 1.5
+	return BoonEffects.get_crushing_blow_mult(target_hp_frac)
 
 
 # ---------------------------------------------------------------------------
@@ -2673,9 +2510,7 @@ func get_crushing_blow_mult(target_hp_frac: float) -> float:
 # Caller passes is_elite_or_boss bool.
 # ---------------------------------------------------------------------------
 func get_bash_big_ones_mult(is_elite_or_boss: bool) -> float:
-	if not bash_big_ones_taken or not is_elite_or_boss:
-		return 1.0
-	return 1.25
+	return BoonEffects.get_bash_big_ones_mult(is_elite_or_boss)
 
 
 # ---------------------------------------------------------------------------
@@ -2683,24 +2518,14 @@ func get_bash_big_ones_mult(is_elite_or_boss: bool) -> float:
 # `current_tier` per-player (0..5) and asks for the mult.
 # ---------------------------------------------------------------------------
 func get_combat_fury_mult(current_tier: int, who: String = "shino") -> float:
-	# Run 139 — per-owner: the caller's own Combat Fury pick + own tier.
-	var _cf: bool = char_has("combat_fury", who)
-	# Run 27f — Burnout corrupt: Combat Fury saturated at max tier permanently.
-	# Run 139 — taker only.
-	if char_has("corrupt_broccoli", who) and _cf:
-		current_tier = COMBAT_FURY_MAX_TIERS
-	if not _cf or current_tier <= 0:
-		return 1.0
-	var t: int = clamp(current_tier, 0, COMBAT_FURY_MAX_TIERS)
-	return 1.0 + (combat_fury_pct_per_tier * float(t))
+	return BoonEffects.get_combat_fury_mult(current_tier, who)
 
 
 # ---------------------------------------------------------------------------
 # Sweet Dreams — heal 5% max HP on room clear, per-character.
 # ---------------------------------------------------------------------------
 func get_sweet_dreams_heal_pct(who: String = "shino") -> float:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	return 0.05 if "sweet_dreams" in s else 0.0
+	return BoonEffects.get_sweet_dreams_heal_pct(who)
 
 
 # ---------------------------------------------------------------------------
@@ -2708,7 +2533,7 @@ func get_sweet_dreams_heal_pct(who: String = "shino") -> float:
 # Player.gd's heal paths should multiply incoming heal amounts by this.
 # ---------------------------------------------------------------------------
 func get_heal_amp() -> float:
-	return heal_amp_mult
+	return BoonEffects.get_heal_amp()
 
 
 # ---------------------------------------------------------------------------
@@ -2721,7 +2546,7 @@ func get_heal_amp() -> float:
 # ---------------------------------------------------------------------------
 const APPLE_PIE_HP_PER_STACK = BoonDBClass.APPLE_PIE_HP_PER_STACK
 func get_apple_pie_max_hp_pct() -> float:
-	return APPLE_PIE_HP_PER_STACK * float(apple_pie_stacks)
+	return BoonEffects.get_apple_pie_max_hp_pct()
 
 
 # Helper for BoonOffer — adds one apple pie stack and broadcasts to players
@@ -3254,56 +3079,22 @@ func _has_any_boon_from_family(fam_name: String) -> bool:
 
 # Returns true if a synergy's family + mode requirements are met.
 func is_synergy_active(synergy_id: String) -> bool:
-	if not SYNERGY_DEFS.has(synergy_id):
-		return false
-	var s: Dictionary = SYNERGY_DEFS[synergy_id]
-	for fam in s.get("required_any", []):
-		if not _has_any_boon_from_family(String(fam)):
-			return false
-	# Mode gate: water synergies require Gelato OFF; gelato synergies require ON.
-	var mode_req: String = String(s.get("mode_required", ""))
-	if mode_req == "water" and melon_gelato_mode:
-		return false
-	if mode_req == "gelato" and not melon_gelato_mode:
-		return false
-	return true
+	return BoonEffects.is_synergy_active(synergy_id)
 
 
 func get_active_synergies() -> Array:
-	var out: Array = []
-	for id in SYNERGY_DEFS.keys():
-		if is_synergy_active(id):
-			out.append(id)
-	return out
+	return BoonEffects.get_active_synergies()
 
 
 # Compact "Synergy: Steam Burst, Wet+Lightning" string for UI.
 func get_active_synergies_summary() -> String:
-	var ids: Array = get_active_synergies()
-	if ids.is_empty():
-		return ""
-	var names: Array = []
-	for id in ids:
-		var d: Dictionary = SYNERGY_DEFS.get(id, {})
-		names.append(d.get("name", id))
-	return "Synergy: " + ", ".join(names)
+	return BoonEffects.get_active_synergies_summary()
 
 
 # Wet + Lightning synergy damage amp — +5% per Soaked stack on lightning hits.
 # Reads target StatusComponent. Per spec §11 #1: max +25% at 5 Soaked / Drenched.
 func get_wet_lightning_target_mult(target_status: Variant) -> float:
-	if not is_synergy_active("wet_lightning"):
-		return 1.0
-	if target_status == null:
-		return 1.0
-	var stacks: int = 0
-	if target_status.has("wet"):
-		stacks = max(stacks, target_status.get_stacks("wet"))
-	if target_status.has("drenched"):
-		stacks = max(stacks, 5)   # Drenched = at-cap state
-	if stacks <= 0:
-		return 1.0
-	return 1.0 + 0.05 * float(min(stacks, 5))
+	return BoonEffects.get_wet_lightning_target_mult(target_status)
 
 
 # Consolidated target-status damage amps reading the target's status.
@@ -3313,38 +3104,7 @@ func get_wet_lightning_target_mult(target_status: Variant) -> float:
 # because the enemy can't tell "who" sourced the damage, we apply it whenever
 # the target is Sparked/Bolted/Shocked AND Wet. This is a reasonable proxy.
 func get_target_status_damage_mult(target_status: Variant) -> float:
-	if target_status == null:
-		return 1.0
-	var mult: float = 1.0
-	# Run 150b (Bruno ruling) — Rising Tide / Blazing Aura REMOVED from this
-	# enemy-side helper: they are holder-only self-buffs and already apply in
-	# each hero's own _get_(bea_)target_status_damage_mult. Having them here
-	# too meant (a) the non-holder benefited and (b) the holder DOUBLE-DIPPED.
-	# Element SYNERGIES below stay team-wide (status combos are shared by rule).
-	# Wet+Lightning synergy: target both Wet AND Shocked/Sparked/Bolted ⇒ amp.
-	if is_synergy_active("wet_lightning"):
-		var has_lightning: bool = target_status.has("sparked") \
-			or target_status.has("bolted") or target_status.has("shocked")
-		if has_lightning:
-			mult *= get_wet_lightning_target_mult(target_status)
-	# Run 27 — Shatter: rock attack on Frostbitten (+10%). Proxy: target is
-	# Frostbitten AND carries Cracked Soil (recent earth hit).
-	if is_synergy_active("shatter") and target_status.is_frostbitten() \
-	and target_status.has("cracked_soil"):
-		mult *= 1.10
-	# Run 27 — Brittle Toxin: poison-applying hit on Frostbitten (+15%).
-	# Proxy: target Frostbitten AND Poisoned.
-	if is_synergy_active("brittle_toxin") and target_status.is_frostbitten() \
-	and target_status.has("poison"):
-		mult *= 1.15
-	# Run 27 — Plasma Strike: lightning hit on Burning (+15%). Proxy: target
-	# Burning AND Sparked/Bolted/Shocked.
-	if is_synergy_active("plasma_strike") and target_status.is_burning():
-		var _has_l2: bool = target_status.has("sparked") \
-			or target_status.has("bolted") or target_status.has("shocked")
-		if _has_l2:
-			mult *= 1.15
-	return mult
+	return BoonEffects.get_target_status_damage_mult(target_status)
 
 
 # --- Family-pairing Duo Boons (Combat_Boons §5) ---
@@ -3363,7 +3123,7 @@ var duos_taken: Dictionary = {}
 
 
 func is_duo_active(duo_id: String) -> bool:
-	return DUO_DEFS.has(duo_id) and duos_taken.has(duo_id)
+	return BoonEffects.is_duo_active(duo_id)
 
 
 # Can this duo be OFFERED right now? ≥2 boons from each family + not taken
@@ -3451,50 +3211,37 @@ func take_duo(duo_id: String) -> void:
 
 
 func get_active_duos() -> Array:
-	var out: Array = []
-	for id in DUO_DEFS.keys():
-		if is_duo_active(id):
-			out.append(id)
-	return out
+	return BoonEffects.get_active_duos()
 
 
 # "Duo: Iron Core, Shell Cluster" UI summary.
 func get_active_duos_summary() -> String:
-	var ids: Array = get_active_duos()
-	if ids.is_empty():
-		return ""
-	var names: Array = []
-	for id in ids:
-		var d: Dictionary = DUO_DEFS.get(id, {})
-		names.append(d.get("name", id))
-	return "Duo: " + ", ".join(names)
+	return BoonEffects.get_active_duos_summary()
 
 
 # Iron Core (Apple + Broccoli) — each owned boon from either tree grants
 # +5% max HP AND +5% damage dealt. Stacks multiplicatively across boons.
 const IRON_CORE_PER_BOON_PCT = BoonDBClass.IRON_CORE_PER_BOON_PCT
 func get_iron_core_count() -> int:
-	if not is_duo_active("iron_core"):
-		return 0
-	return apple_boons_taken + broccoli_boons_taken
+	return BoonEffects.get_iron_core_count()
 func get_iron_core_hp_mult() -> float:
-	return 1.0 + IRON_CORE_PER_BOON_PCT * float(get_iron_core_count())
+	return BoonEffects.get_iron_core_hp_mult()
 func get_iron_core_damage_mult() -> float:
-	return 1.0 + IRON_CORE_PER_BOON_PCT * float(get_iron_core_count())
+	return BoonEffects.get_iron_core_damage_mult()
 
 
 # Aimed Guard (Carrot + Coconut) — Player.gd queries on crit, observes 2s ICD.
 const AIMED_GUARD_OVERSHIELD_DUR = BoonDBClass.AIMED_GUARD_OVERSHIELD_DUR
 const AIMED_GUARD_ICD = BoonDBClass.AIMED_GUARD_ICD
 func aimed_guard_active() -> bool:
-	return is_duo_active("aimed_guard")
+	return BoonEffects.aimed_guard_active()
 
 
 # Shell Cluster (Coconut + Grape) — mirror-share overshield grants between
 # Shino + Bea. Implemented in the overshield-grant call site (Player.gd /
 # BeaAI.gd already share an in-script grant helper); this getter just gates.
 func shell_cluster_active() -> bool:
-	return is_duo_active("shell_cluster")
+	return BoonEffects.shell_cluster_active()
 
 
 # ---- Run 22 Duo getters ----
@@ -3504,9 +3251,9 @@ func shell_cluster_active() -> bool:
 # and applies it to their own max HP.
 const VITAL_HARVEST_HEAL_PCT = BoonDBClass.VITAL_HARVEST_HEAL_PCT
 func vital_harvest_active() -> bool:
-	return is_duo_active("vital_harvest")
+	return BoonEffects.vital_harvest_active()
 func get_vital_harvest_heal_pct() -> float:
-	return VITAL_HARVEST_HEAL_PCT if vital_harvest_active() else 0.0
+	return BoonEffects.get_vital_harvest_heal_pct()
 
 
 # Shock Ignition (Pepper + Grape) — Shocked enemies: +25% ignite chance on next
@@ -3514,36 +3261,36 @@ func get_vital_harvest_heal_pct() -> float:
 # _apply_family_statuses_on_hit when applying burning to a shocked target.
 const SHOCK_IGNITION_BURN_CHANCE_BONUS = BoonDBClass.SHOCK_IGNITION_BURN_CHANCE_BONUS
 func shock_ignition_active() -> bool:
-	return is_duo_active("shock_ignition")
+	return BoonEffects.shock_ignition_active()
 func get_shock_ignition_burn_bonus() -> float:
-	return SHOCK_IGNITION_BURN_CHANCE_BONUS if shock_ignition_active() else 0.0
+	return BoonEffects.get_shock_ignition_burn_bonus()
 
 
 # Root & Rot (Potato + Onion) — Rooted enemies take +20% Poison damage.
 # Queried by enemy take_damage when poison-DoT ticks and the target is Rooted.
 const ROOT_AND_ROT_POISON_AMP = BoonDBClass.ROOT_AND_ROT_POISON_AMP
 func root_and_rot_active() -> bool:
-	return is_duo_active("root_and_rot")
+	return BoonEffects.root_and_rot_active()
 func get_root_and_rot_amp() -> float:
-	return ROOT_AND_ROT_POISON_AMP if root_and_rot_active() else 0.0
+	return BoonEffects.get_root_and_rot_amp()
 
 
 # Bruise Peel (Banana + Broccoli) — slipping enemy hit → 1.5s Stagger.
 # Queried at melee hit site: if target has "slippery" status → apply stagger.
 const BRUISE_PEEL_STAGGER_DUR = BoonDBClass.BRUISE_PEEL_STAGGER_DUR
 func bruise_peel_active() -> bool:
-	return is_duo_active("bruise_peel")
+	return BoonEffects.bruise_peel_active()
 func get_bruise_peel_stagger_dur() -> float:
-	return BRUISE_PEEL_STAGGER_DUR if bruise_peel_active() else 0.0
+	return BoonEffects.get_bruise_peel_stagger_dur()
 
 
 # Frost Shield (Watermelon + Coconut) — frozen/chilled attacker deals 15% less
 # damage. Queried in Player + BeaAI take_damage when attacker has ice status.
 const FROST_SHIELD_DAMAGE_REDUCTION = BoonDBClass.FROST_SHIELD_DAMAGE_REDUCTION
 func frost_shield_active() -> bool:
-	return is_duo_active("frost_shield")
+	return BoonEffects.frost_shield_active()
 func get_frost_shield_reduction() -> float:
-	return FROST_SHIELD_DAMAGE_REDUCTION if frost_shield_active() else 0.0
+	return BoonEffects.get_frost_shield_reduction()
 
 
 # Run 23 — 6 new duo getters -----------------------------------------------
@@ -3552,9 +3299,9 @@ func get_frost_shield_reduction() -> float:
 # Queried in enemy take_damage when target has both "burning" and "root" statuses.
 const PEPPER_POTATO_DAMAGE_AMP = BoonDBClass.PEPPER_POTATO_DAMAGE_AMP
 func pepper_potato_active() -> bool:
-	return is_duo_active("pepper_potato")
+	return BoonEffects.pepper_potato_active()
 func get_pepper_potato_amp() -> float:
-	return PEPPER_POTATO_DAMAGE_AMP if pepper_potato_active() else 0.0
+	return BoonEffects.get_pepper_potato_amp()
 
 # Apple + Watermelon — Orchard Rain: heals cleanse 1 stack of Bleed or Poison.
 # Queried at the apply_runstate_modifiers heal path and any direct heal.
@@ -3563,40 +3310,40 @@ const SPRING_TIDE_RADIUS = BoonDBClass.SPRING_TIDE_RADIUS
 const SPRING_TIDE_DURATION = BoonDBClass.SPRING_TIDE_DURATION
 const SPRING_TIDE_REGEN_HP = BoonDBClass.SPRING_TIDE_REGEN_HP
 func apple_watermelon_active() -> bool:
-	return is_duo_active("apple_watermelon")
+	return BoonEffects.apple_watermelon_active()
 
 # Onion + Grape — Toxic Combo: finisher hits on Poisoned enemies trigger a Poison burst.
 # Queried at melee finisher hit sites when target has "poison" status.
 const ONION_GRAPE_POISON_BURST_STACKS = BoonDBClass.ONION_GRAPE_POISON_BURST_STACKS
 func onion_grape_active() -> bool:
-	return is_duo_active("onion_grape")
+	return BoonEffects.onion_grape_active()
 func get_onion_grape_poison_burst() -> int:
-	return ONION_GRAPE_POISON_BURST_STACKS if onion_grape_active() else 0
+	return BoonEffects.get_onion_grape_poison_burst()
 
 # Banana + Pepper — Slip & Burn: slipping enemies have +40% ignite chance on next hit.
 # Queried alongside existing slippery checks in _apply_family_statuses_on_hit.
 const BANANA_PEPPER_IGNITE_CHANCE = BoonDBClass.BANANA_PEPPER_IGNITE_CHANCE
 func banana_pepper_active() -> bool:
-	return is_duo_active("banana_pepper")
+	return BoonEffects.banana_pepper_active()
 func get_banana_pepper_ignite_chance() -> float:
-	return BANANA_PEPPER_IGNITE_CHANCE if banana_pepper_active() else 0.0
+	return BoonEffects.get_banana_pepper_ignite_chance()
 
 # Carrot + Watermelon — Refreshing Aim: ranged crits heal crit hero 4% max HP.
 # Queried in Player._on_ki_blast_crit (and Bea shuriken hit site when crit).
 const CARROT_WATERMELON_RANGED_CRIT_HEAL_PCT = BoonDBClass.CARROT_WATERMELON_RANGED_CRIT_HEAL_PCT
 func carrot_watermelon_active() -> bool:
-	return is_duo_active("carrot_watermelon")
+	return BoonEffects.carrot_watermelon_active()
 func get_carrot_watermelon_ranged_crit_heal_pct() -> float:
-	return CARROT_WATERMELON_RANGED_CRIT_HEAL_PCT if carrot_watermelon_active() else 0.0
+	return BoonEffects.get_carrot_watermelon_ranged_crit_heal_pct()
 
 # Broccoli + Onion — Stinging Greens: Y heavy finishers apply 1 Poison stack.
 # Queried at finisher call-site in Player._on_melee_hitbox_body_entered and
 # BeaAI._tap_katana after the finisher damage resolves.
 const BROCCOLI_ONION_FINISHER_POISON_STACKS = BoonDBClass.BROCCOLI_ONION_FINISHER_POISON_STACKS
 func broccoli_onion_active() -> bool:
-	return is_duo_active("broccoli_onion")
+	return BoonEffects.broccoli_onion_active()
 func get_broccoli_onion_finisher_poison() -> int:
-	return BROCCOLI_ONION_FINISHER_POISON_STACKS if broccoli_onion_active() else 0
+	return BoonEffects.get_broccoli_onion_finisher_poison()
 
 # ---------------------------------------------------------------------------
 
@@ -3605,7 +3352,7 @@ func get_broccoli_onion_finisher_poison() -> int:
 # decay) AND grant Nutshell-style burst + 2s i-frames on break. Player
 # reads this at overshield-tick + overshield-break.
 func adamantium_active() -> bool:
-	return adamantium_husk_taken
+	return BoonEffects.adamantium_active()
 
 
 # Hulk Smash (Broccoli L2) — GDD spec (reworked):
@@ -3622,93 +3369,63 @@ const HULK_SMASH_PER_COMBO_RADIUS = BoonDBClass.HULK_SMASH_PER_COMBO_RADIUS
 const HULK_SMASH_BASE_DAMAGE = BoonDBClass.HULK_SMASH_BASE_DAMAGE
 const HULK_SMASH_PER_COMBO_DAMAGE = BoonDBClass.HULK_SMASH_PER_COMBO_DAMAGE
 func get_hulk_smash_radius(combo_count: int) -> float:
-	if not hulk_smash_taken:
-		return 0.0
-	return HULK_SMASH_BASE_RADIUS + HULK_SMASH_PER_COMBO_RADIUS * float(combo_count)
+	return BoonEffects.get_hulk_smash_radius(combo_count)
 func get_hulk_smash_damage(combo_count: int) -> int:
-	if not hulk_smash_taken:
-		return 0
-	return HULK_SMASH_BASE_DAMAGE + int(HULK_SMASH_PER_COMBO_DAMAGE * float(combo_count))
-# Convenience: multiplier for charge damage (+100% when Hulk Smash taken).
+	return BoonEffects.get_hulk_smash_damage(combo_count)
 func get_hulk_smash_charge_mult() -> float:
-	return HULK_SMASH_CHARGE_DMG_MULT if hulk_smash_taken else 1.0
-# Charge windup time multiplier (0.50 = 50% faster when taken).
+	return BoonEffects.get_hulk_smash_charge_mult()
 func get_hulk_smash_windup_mult() -> float:
-	return HULK_SMASH_WINDUP_MULT if hulk_smash_taken else 1.0
+	return BoonEffects.get_hulk_smash_windup_mult()
 # Big Broccoli — +50% AoE radius / hitbox size on all charge attacks.
 func get_big_broccoli_aoe_mult() -> float:
-	return 1.5 if big_broccoli_taken else 1.0
+	return BoonEffects.get_big_broccoli_aoe_mult()
 
 # Run 131 — Fury Release (Broccoli Charge): +40% charge hitbox/AoE size for the
 # owning hero (per-ninja). The +60% charge damage is applied in each hero's
 # _scale_damage charge branch (also gated on ownership).
 func get_fury_release_area_mult(who: String) -> float:
-	return (1.0 + FURY_RELEASE_AREA_BONUS) if char_has("fury_release", who) else 1.0
+	return BoonEffects.get_fury_release_area_mult(who)
 
 
 # Juicebox of Youth reworked (GDD spec): spawns a pickup every 10s, both heroes
 # regen on collect. Kill-heal is removed. This function kept as a stub so
 # existing call sites at _apply_charge_kill_heal don't error.
 func get_juicebox_kill_heal_pct() -> float:
-	return 0.0   # kill-heal removed — regen now comes from pickup spawn
+	return BoonEffects.get_juicebox_kill_heal_pct()
 
 
 # ---------------------------------------------------------------------------
 # Granny's Recipe — +30% to all healing. Stackable with everything.
 # ---------------------------------------------------------------------------
 func get_heal_mult(who: String = "") -> float:
-	# Run 139 — per-owner: the healed ninja's own picks decide the multiplier.
-	# who == "" keeps legacy team-wide behavior for unattributed heal sites.
-	var m: float = 1.0
-	if _pick_has("grannys_recipe", who):
-		m *= 1.30
-	# Run 27f — Cold Waters corrupt: HP regen halved from all sources.
-	# Run 139 — taker only.
-	if _pick_has("corrupt_watermelon", who):
-		m *= 0.50
-	return m
+	return BoonEffects.get_heal_mult(who)
 
 # ---------------------------------------------------------------------------
 # Chip-Proof — no single hit may remove more than 15% of max HP.
 # Returns the capped hit amount (call from Player/Bea take_damage).
 # ---------------------------------------------------------------------------
 func chip_proof_cap(amount: int, max_hp: int, who: String = "shino") -> int:
-	# Run 139 — per-char: only the ninja who picked Chip-Proof gets the cap.
-	if not char_has("chip_proof", who) or max_hp <= 0:
-		return amount
-	var cap_val: int = max(1, int(ceil(float(max_hp) * 0.15)))
-	return min(amount, cap_val)
+	return BoonEffects.chip_proof_cap(amount, max_hp, who)
 
 # ---------------------------------------------------------------------------
 # Seeded Shot — ranged bonus = 1% current HP (flat extra, not a mult).
 # ---------------------------------------------------------------------------
 func seeded_shot_bonus_dmg(current_hp: int, who: String = "shino") -> int:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if "seeded_shot" not in s:
-		return 0
-	return max(1, int(round(float(current_hp) * 0.01)))
+	return BoonEffects.seeded_shot_bonus_dmg(current_hp, who)
 
 # ---------------------------------------------------------------------------
 # Heavy Harvest — X/heavy attacks gain up to +25% dmg at full HP (linear scale).
 # Per-character: only the ninja who picked this boon benefits.
 # ---------------------------------------------------------------------------
 func get_heavy_harvest_mult(hp_frac: float, who: String = "shino") -> float:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if "heavy_harvest" not in s:
-		return 1.0
-	return 1.0 + clampf(hp_frac, 0.0, 1.0) * 0.25
+	return BoonEffects.get_heavy_harvest_mult(hp_frac, who)
 
 # ---------------------------------------------------------------------------
 # Sweet Harvest — Charge attacks: +20% dmg when above 75% HP.
 # Per-character: only the ninja who picked this boon benefits.
 # ---------------------------------------------------------------------------
 func get_sweet_harvest_mult(hp_frac: float, who: String = "shino") -> float:
-	var s: Dictionary = shino_boon_set if who == "shino" else bea_boon_set
-	if "sweet_harvest" not in s:
-		return 1.0
-	if hp_frac >= 0.75:
-		return 1.20
-	return 1.0
+	return BoonEffects.get_sweet_harvest_mult(hp_frac, who)
 
 # ---------------------------------------------------------------------------
 # Tide Master — Ult cost -20%. Refund 25% of base chi cost on cast.
@@ -3717,14 +3434,10 @@ func get_sweet_harvest_mult(hp_frac: float, who: String = "shino") -> float:
 # gets the discount/refund. `who == ""` keeps legacy team-wide behavior for
 # any unattributed caller.
 func tide_master_ult_cost_mult(who: String = "") -> float:
-	if not _pick_has("tide_master", who):
-		return 1.0
-	return 0.80
+	return BoonEffects.tide_master_ult_cost_mult(who)
 
 func tide_master_refund(base_cost: int, who: String = "") -> int:
-	if not _pick_has("tide_master", who):
-		return 0
-	return max(1, int(round(float(base_cost) * 0.25)))
+	return BoonEffects.tide_master_refund(base_cost, who)
 
 
 # ---------------------------------------------------------------------------
@@ -3735,9 +3448,7 @@ var _cluster_cascade_y_primed: float = 0.0   # timer; X-next gets +25%
 var _cluster_cascade_x_primed: float = 0.0   # timer; Y-next gets +50%
 
 func get_cluster_mastery_double_chance(combo: int) -> float:
-	if not cluster_mastery_taken:
-		return 0.0
-	return minf(0.30, float(combo) * 0.01)
+	return BoonEffects.get_cluster_mastery_double_chance(combo)
 
 func tick_cluster_cascade(delta: float) -> void:
 	if _cluster_cascade_y_primed > 0.0:
@@ -3754,24 +3465,13 @@ func notify_cluster_cascade_finisher(is_y_finisher: bool) -> void:
 		_cluster_cascade_x_primed = 4.0   # prime Y for 4s
 
 func get_cluster_cascade_mult(is_y_finisher: bool) -> float:
-	if not cluster_cascade_taken:
-		return 1.0
-	# Y finisher fires → X was primed → Y gets +50%
-	if is_y_finisher and _cluster_cascade_x_primed > 0.0:
-		return 1.50
-	# X finisher fires → Y was primed → X gets +25%
-	if not is_y_finisher and _cluster_cascade_y_primed > 0.0:
-		return 1.25
-	return 1.0
+	return BoonEffects.get_cluster_cascade_mult(is_y_finisher)
 
 # ---------------------------------------------------------------------------
 # Overripe — Poison max stacks: base 5 → 7 (each boon level adds 1, cap 10).
 # ---------------------------------------------------------------------------
 func get_overripe_poison_max() -> int:
-	if not overripe_taken:
-		return 5   # base
-	var lvl: int = get_boon_level("overripe")
-	return min(10, 5 + 1 + lvl)   # level 1 = 7, level 2 = 8, ...
+	return BoonEffects.get_overripe_poison_max()
 
 # ---------------------------------------------------------------------------
 # Rotten Core — callback: poisoned enemy just died → burst stink cloud.
@@ -3900,13 +3600,7 @@ func rotten_core_on_enemy_death(was_poisoned: bool) -> bool:
 # Returns flat damage for the spike (0 = no proc).
 # ---------------------------------------------------------------------------
 func spineback_retaliate(incoming_dmg: int, who: String = "shino") -> int:
-	# Run 139 — per-char: only the ninja who picked Spineback retaliates.
-	if not char_has("spineback", who) or incoming_dmg <= 0:
-		return 0
-	if randf() >= 0.30:
-		return 0
-	# Spike deals 50% of incoming hit back at attacker
-	return max(1, int(round(float(incoming_dmg) * 0.50)))
+	return BoonEffects.spineback_retaliate(incoming_dmg, who)
 
 
 # Run 134 — Drawn Bow idle thresholds (single source of truth, read by both
@@ -3941,16 +3635,14 @@ func tick_sniper_focus(was_crit: bool, who: String = "shino", delta: float = 0.0
 	else:
 		sniper_focus_crit_streak[who] = 0
 func get_sniper_focus_mult(who: String = "shino") -> float:
-	if not sniper_focus_taken or float(sniper_focus_bonus_timer.get(who, 0.0)) <= 0.0:
-		return 1.0
-	return 1.0 + SNIPER_FOCUS_BONUS_DMG
+	return BoonEffects.get_sniper_focus_mult(who)
 
 
 # Run 24 — Slip Stream (Banana Legendary): dash through an enemy → leaves a
 # 3s Grease field + extends i-frame window. Player.gd _perform_dash reads
 # this flag and triggers the grease field spawn when an enemy is intersected.
 func slip_stream_active() -> bool:
-	return slip_stream_taken
+	return BoonEffects.slip_stream_active()
 const SLIP_STREAM_IFRAMES_BONUS = BoonDBClass.SLIP_STREAM_IFRAMES_BONUS
 
 
@@ -3961,14 +3653,14 @@ const SLIP_STREAM_IFRAMES_BONUS = BoonDBClass.SLIP_STREAM_IFRAMES_BONUS
 # sparked/bolted and Greased Lightning is on.
 const GRAPE_BANANA_CRIT_BONUS = BoonDBClass.GRAPE_BANANA_CRIT_BONUS
 func grape_banana_active() -> bool:
-	return is_duo_active("grape_banana")
+	return BoonEffects.grape_banana_active()
 func get_grape_banana_crit_bonus() -> float:
-	return GRAPE_BANANA_CRIT_BONUS if grape_banana_active() else 0.0
+	return BoonEffects.get_grape_banana_crit_bonus()
 
 # Apple + Pepper — Baked Apple: large heal events ignite nearest enemy.
 # Queried at heal-apply sites when heal amount > 10% max HP.
 func apple_pepper_active() -> bool:
-	return is_duo_active("apple_pepper")
+	return BoonEffects.apple_pepper_active()
 const BAKED_APPLE_HEAL_THRESHOLD_PCT = BoonDBClass.BAKED_APPLE_HEAL_THRESHOLD_PCT
 const BAKED_APPLE_BURN_STACKS = BoonDBClass.BAKED_APPLE_BURN_STACKS
 
@@ -3976,19 +3668,17 @@ const BAKED_APPLE_BURN_STACKS = BoonDBClass.BAKED_APPLE_BURN_STACKS
 # Queried in all 4 enemy take_damage paths (same location as pepper_potato).
 const POTATO_WATERMELON_AMP = BoonDBClass.POTATO_WATERMELON_AMP
 func potato_watermelon_active() -> bool:
-	return is_duo_active("potato_watermelon")
+	return BoonEffects.potato_watermelon_active()
 func get_potato_watermelon_amp() -> float:
-	return POTATO_WATERMELON_AMP if potato_watermelon_active() else 0.0
+	return BoonEffects.get_potato_watermelon_amp()
 
 # Coconut + Broccoli — Ironwood: while overshield active, +10% damage.
 # Queried in _scale_damage / _bea_scale_damage when overshield count > 0.
 const COCONUT_BROCCOLI_SHIELD_DMG_BONUS = BoonDBClass.COCONUT_BROCCOLI_SHIELD_DMG_BONUS
 func coconut_broccoli_active() -> bool:
-	return is_duo_active("coconut_broccoli")
+	return BoonEffects.coconut_broccoli_active()
 func get_coconut_broccoli_dmg_mult(overshield_count: int) -> float:
-	if not coconut_broccoli_active() or overshield_count <= 0:
-		return 1.0
-	return 1.0 + COCONUT_BROCCOLI_SHIELD_DMG_BONUS
+	return BoonEffects.get_coconut_broccoli_dmg_mult(overshield_count)
 
 
 # Run 27 — Burning Aim duo (Carrot + Pepper), both arms now wired.
@@ -4027,14 +3717,10 @@ func _process(delta: float) -> void:
 	_burning_aim_arena_stacks = n
 
 func get_burning_aim_crit_chance_bonus() -> float:
-	if not burning_aim_active():
-		return 0.0
-	return BURNING_AIM_PCT_PER_STACK * float(_burning_aim_arena_stacks)
+	return BoonEffects.get_burning_aim_crit_chance_bonus()
 
 func get_burning_aim_attack_speed_bonus() -> float:
-	if not burning_aim_active():
-		return 0.0
-	return BURNING_AIM_PCT_PER_STACK * float(_burning_aim_arena_stacks)
+	return BoonEffects.get_burning_aim_attack_speed_bonus()
 
 
 # Run 27 — Baked Apple duo (Apple + Pepper): heal events > 10% max HP ignite
@@ -4059,25 +3745,23 @@ func baked_apple_duo_ignite(tree: SceneTree, pos: Vector2) -> void:
 # Queried at Ki Blast / shuriken fire sites if target has "poison" status.
 const CARROT_ONION_POISON_CRIT_BONUS = BoonDBClass.CARROT_ONION_POISON_CRIT_BONUS
 func carrot_onion_active() -> bool:
-	return is_duo_active("carrot_onion")
+	return BoonEffects.carrot_onion_active()
 func get_carrot_onion_crit_bonus() -> float:
-	return CARROT_ONION_POISON_CRIT_BONUS if carrot_onion_active() else 0.0
+	return BoonEffects.get_carrot_onion_crit_bonus()
 
 
 # ---- Run 28 Duo getters — priority active-effect pairs ----
 
 # Apple + Grape — Bunch Bloom: every combo finisher refunds 1 HP (2 at combo 30).
 func bunch_bloom_active() -> bool:
-	return is_duo_active("apple_grape")
+	return BoonEffects.bunch_bloom_active()
 func get_bunch_bloom_finisher_heal(combo_count: int) -> int:
-	if not bunch_bloom_active():
-		return 0
-	return 2 if combo_count >= 30 else 1
+	return BoonEffects.get_bunch_bloom_finisher_heal(combo_count)
 
 # Carrot + Grape — Master Stroke: combo finishers are guaranteed crits.
 # Caller sets RunState.force_next_crit = true before the finisher damage roll.
 func master_stroke_active() -> bool:
-	return is_duo_active("carrot_grape")
+	return BoonEffects.master_stroke_active()
 
 # Carrot + Pepper — Burning Aim:
 #   Arm 1 — crits apply 2 Burn stacks (wired at crit call site).
@@ -4085,20 +3769,17 @@ func master_stroke_active() -> bool:
 #   burn_count queried per-frame from all enemies (caller caches the count).
 const BURNING_AIM_PER_STACK_BONUS = BoonDBClass.BURNING_AIM_PER_STACK_BONUS
 func burning_aim_active() -> bool:
-	return is_duo_active("carrot_pepper")
+	return BoonEffects.burning_aim_active()
 func get_burning_aim_bonus(burn_stack_count: int) -> float:
-	# Returns flat additive bonus (applied to both AS mult and crit_chance).
-	if not burning_aim_active() or burn_stack_count <= 0:
-		return 0.0
-	return BURNING_AIM_PER_STACK_BONUS * float(burn_stack_count)
+	return BoonEffects.get_burning_aim_bonus(burn_stack_count)
 
 # Broccoli + Pepper — Firebrand: X (heavy) hits apply 2 Burn stacks for 3s.
 func firebrand_active() -> bool:
-	return is_duo_active("broccoli_pepper")
+	return BoonEffects.firebrand_active()
 
 # Broccoli + Watermelon — Splash Smash: X / X-charge applies +3 Soaked (or Chilled in Gelato).
 func splash_smash_active() -> bool:
-	return is_duo_active("broccoli_watermelon")
+	return BoonEffects.splash_smash_active()
 
 # Grape + Watermelon — Cluster Splash: melee finishers burst 2m AoE Soaked/Chilled + +3 combo.
 # At combo 30: every Y/X hit triggers the burst.
@@ -4106,24 +3787,20 @@ const CLUSTER_SPLASH_RADIUS = BoonDBClass.CLUSTER_SPLASH_RADIUS
 const CLUSTER_SPLASH_STACKS = BoonDBClass.CLUSTER_SPLASH_STACKS
 const CLUSTER_SPLASH_COMBO_BONUS = BoonDBClass.CLUSTER_SPLASH_COMBO_BONUS
 func cluster_splash_active() -> bool:
-	return is_duo_active("grape_watermelon")
+	return BoonEffects.cluster_splash_active()
 func should_cluster_splash_trigger(is_finisher: bool, combo_count: int) -> bool:
-	if not cluster_splash_active():
-		return false
-	return is_finisher or combo_count >= 30
+	return BoonEffects.should_cluster_splash_trigger(is_finisher, combo_count)
 
 # Grape + Potato — Stomp Combo: Y finisher → cracked-earth short line; X finisher →
 # earthspike short line. At combo 30: both extend to long lines.
 func stomp_combo_active() -> bool:
-	return is_duo_active("grape_potato")
+	return BoonEffects.stomp_combo_active()
 func get_stomp_combo_line_length(combo_count: int) -> float:
-	if not stomp_combo_active():
-		return 0.0
-	return 192.0 if combo_count >= 30 else 96.0   # ~3 vs ~6 tiles at 32px each
+	return BoonEffects.get_stomp_combo_line_length(combo_count)
 
 # Broccoli + Potato — Earthshaker: X finisher / X-charge launches enemies + 3 Cracked Soil.
 func earthshaker_active() -> bool:
-	return is_duo_active("broccoli_potato")
+	return BoonEffects.earthshaker_active()
 
 # ---------------------------------------------------------------------------
 
