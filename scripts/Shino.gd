@@ -167,8 +167,7 @@ var dojo_wait_pos: Vector2 = Vector2.ZERO
 # Run 26d — Baked Apple finisher-only HoT. Set to BAKED_APPLE_HOT_DURATION
 # on each Y4/X3 finisher; tick down in _physics_process. Refreshes (doesn't
 # stack) — multiple finishers within the window just reset the timer.
-var _baked_apple_hot_remaining: float = 0.0
-var _baked_apple_hot_accum:     float = 0.0
+# _baked_apple_hot_remaining / _baked_apple_hot_accum → moved to HeroBase (Run 154 parity sweep)
 
 # --- Post-dash temporary buffs ---
 # Peel Out (Banana): on dash → +30% MS + AS for 5s (approximation: any dash counts).
@@ -1412,13 +1411,7 @@ func _start_dash() -> void:
 # DreamRoom). ON during a dash → the ninja slips through rocks/walls; OFF
 # otherwise. Outer walls + gates are separate bodies (not in the group), so
 # the hero can never dash out of the arena bounds.
-func _set_barrier_phasing(on: bool) -> void:
-	for b in get_tree().get_nodes_in_group("dashable_barrier"):
-		if b is PhysicsBody2D:
-			if on:
-				add_collision_exception_with(b)
-			else:
-				remove_collision_exception_with(b)
+# _set_barrier_phasing → moved to HeroBase (Run 154 parity sweep; byte-identical both heroes)
 
 
 func _get_max_dash_charges() -> int:
@@ -3277,36 +3270,9 @@ func _apply_melee_lifesteal(damage_dealt: int) -> void:
 
 
 # Run 26d — Baked Apple finisher HoT.
-# Called on each Y4 / X3 combo finisher. (Re)starts a 5s 1-HP/sec regen.
-# Stacks with the existing healing pipeline (no special amp; uses raw HP set).
-func _start_baked_apple_hot() -> void:
-	# Run 154 Batch 6 — picker-only self-buff (Run 150b lock; sibling Apple passive
-	# Sweet Dreams gates per-hero too). Was RunState.baked_apple_taken (GLOBAL) — a
-	# rot that let Shino heal from a finisher-HoT only Bea owned. Now per-hero.
-	if not RunState.shino_has("baked_apple"):
-		return
-	_baked_apple_hot_remaining = RunState.BAKED_APPLE_HOT_DURATION
-	_baked_apple_hot_accum = 0.0
-	# Tiny visual ping so the player sees the proc.
-	FX.spawn_hit_particles(global_position + Vector2(0, -20),
-		Color(0.95, 0.55, 0.30, 1.0), 3)
-
-
-func _tick_baked_apple_hot(delta: float) -> void:
-	if _baked_apple_hot_remaining <= 0.0:
-		return
-	# Tick down the duration.
-	var step: float = min(delta, _baked_apple_hot_remaining)
-	_baked_apple_hot_remaining -= step
-	# Heal 1 HP per accumulated second (fractional accumulator → whole-HP applies).
-	_baked_apple_hot_accum += step * RunState.BAKED_APPLE_HOT_HP_PER_SEC
-	if _baked_apple_hot_accum >= 1.0:
-		var whole: int = int(floor(_baked_apple_hot_accum))
-		_baked_apple_hot_accum -= float(whole)
-		var max_hp_eff: int = get_effective_max_hp()
-		if current_hp < max_hp_eff:
-			current_hp = min(max_hp_eff, current_hp + whole)
-			emit_signal("hp_changed", current_hp, max_hp_eff)
+# _start_baked_apple_hot / _tick_baked_apple_hot → moved to HeroBase (Run 154 parity
+# sweep). Called on each Y4/X3 finisher; ticks 1 HP/sec for 5s. Picker-only gate now
+# via _hero_has("baked_apple") (= shino_has here); HP emit via _emit_hp_signal.
 
 
 func _on_hit_connected(dmg: int) -> void:

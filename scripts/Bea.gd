@@ -86,9 +86,7 @@ var _ai_unstick_side: float = 1.0
 var _ai_unstick_fails: int = 0          # consecutive failed bursts → peel further off the wall
 
 # --- Apple DD revive HoT state (_dd_hot_*) moved to HeroBase (Batch 4) ---
-# --- Baked Apple finisher HoT (Run 27 — mirrors Player.gd _start_baked_apple_hot) ---
-var _baked_apple_hot_remaining: float = 0.0
-var _baked_apple_hot_accum:     float = 0.0
+# --- Baked Apple finisher HoT (_baked_apple_hot_*) moved to HeroBase (Run 154 parity sweep) ---
 # _last_applied_max_hp moved to HeroBase (Batch 5).
 # --- Evergreen Step dash-heal state (mirrors Player.gd) ---
 var _evergreen_step_active: bool = false
@@ -1815,13 +1813,7 @@ func _start_dash() -> void:
 # Toggle collision exceptions with every inner-barrier body (group set by
 # DreamRoom). ON during a dash → Bea slips through rocks/walls; OFF otherwise.
 # Outer walls + gates are separate bodies, so she can't dash out of bounds.
-func _set_barrier_phasing(on: bool) -> void:
-	for b in get_tree().get_nodes_in_group("dashable_barrier"):
-		if b is PhysicsBody2D:
-			if on:
-				add_collision_exception_with(b)
-			else:
-				remove_collision_exception_with(b)
+# _set_barrier_phasing → moved to HeroBase (Run 154 parity sweep; byte-identical both heroes)
 
 
 func _tick_dash(delta: float) -> void:
@@ -5130,29 +5122,9 @@ func _try_consume_dd_charge() -> bool:
 # Called by _tap_katana when is_finisher == true.
 # Starts a 5s / 1 HP-per-sec regen; refreshes on each finisher proc.
 
-func _start_baked_apple_hot() -> void:
-	if not RunState.bea_has("baked_apple"):
-		return
-	_baked_apple_hot_remaining = RunState.BAKED_APPLE_HOT_DURATION
-	_baked_apple_hot_accum = 0.0
-	# Tiny amber particle ping so the player sees the proc on Bea.
-	FX.spawn_hit_particles(global_position + Vector2(0, -20),
-		Color(0.95, 0.55, 0.30, 1.0), 3)
-
-
-func _tick_baked_apple_hot(delta: float) -> void:
-	if _baked_apple_hot_remaining <= 0.0:
-		return
-	var step: float = min(delta, _baked_apple_hot_remaining)
-	_baked_apple_hot_remaining -= step
-	_baked_apple_hot_accum += step * RunState.BAKED_APPLE_HOT_HP_PER_SEC
-	if _baked_apple_hot_accum >= 1.0:
-		var whole: int = int(floor(_baked_apple_hot_accum))
-		_baked_apple_hot_accum -= float(whole)
-		var max_hp_eff: int = get_effective_max_hp()
-		if current_hp < max_hp_eff:
-			current_hp = min(max_hp_eff, current_hp + whole)
-			emit_signal("bea_hp_changed", current_hp, max_hp_eff)
+# _start_baked_apple_hot / _tick_baked_apple_hot → moved to HeroBase (Run 154 parity
+# sweep). Picker-only gate now via _hero_has("baked_apple") (= bea_has here); HP emit
+# via _emit_hp_signal (= bea_hp_changed here). Zero behavior change.
 
 
 # apply_sweet_dreams_heal moved to HeroBase (Batch 5).

@@ -411,6 +411,10 @@ var _interact_prompt:    Label = null           # "Press [E] to revive" prompt
 var _dd_hot_pct_per_sec: float = 0.0
 var _dd_hot_remaining:   float = 0.0
 var _dd_hot_accum:       float = 0.0             # fractional HP accumulator between applies
+# Baked Apple finisher HoT (Run 27) — unified Run 154 hero-parity sweep. Identical
+# defaults were declared in both children; picker-only per Run 150b (gate via _hero_has).
+var _baked_apple_hot_remaining: float = 0.0
+var _baked_apple_hot_accum:     float = 0.0
 
 # --- Per-hero FX/config (Shino defaults here; Bea overrides in her _ready) ----
 # take_damage hurt cue.
@@ -1087,6 +1091,46 @@ func apply_sweet_dreams_heal() -> int:
 	current_hp = min(max_hp_eff, current_hp + heal)
 	_emit_hp_signal()
 	return current_hp - before
+
+
+# --- Baked Apple finisher HoT (Run 27) — unified into HeroBase (Run 154 hero-parity
+# sweep). Picker-only self-buff (Run 150b / Run 26 locks) gated via _hero_has; HP
+# signal via _emit_hp_signal (per-hero override). Bodies were byte-identical across
+# both heroes modulo those two hooks — zero behavior change. --------------------
+func _start_baked_apple_hot() -> void:
+	if not _hero_has("baked_apple"):
+		return
+	_baked_apple_hot_remaining = RunState.BAKED_APPLE_HOT_DURATION
+	_baked_apple_hot_accum = 0.0
+	# Tiny particle ping so the player sees the proc.
+	FX.spawn_hit_particles(global_position + Vector2(0, -20),
+		Color(0.95, 0.55, 0.30, 1.0), 3)
+
+
+func _tick_baked_apple_hot(delta: float) -> void:
+	if _baked_apple_hot_remaining <= 0.0:
+		return
+	var step: float = min(delta, _baked_apple_hot_remaining)
+	_baked_apple_hot_remaining -= step
+	_baked_apple_hot_accum += step * RunState.BAKED_APPLE_HOT_HP_PER_SEC
+	if _baked_apple_hot_accum >= 1.0:
+		var whole: int = int(floor(_baked_apple_hot_accum))
+		_baked_apple_hot_accum -= float(whole)
+		var max_hp_eff: int = get_effective_max_hp()
+		if current_hp < max_hp_eff:
+			current_hp = min(max_hp_eff, current_hp + whole)
+			_emit_hp_signal()
+
+
+# --- Barrier phasing (Run 87/110) — dash phases through inner "dashable_barrier"
+# props; byte-identical across heroes, unified Run 154 hero-parity sweep. --------
+func _set_barrier_phasing(on: bool) -> void:
+	for b in get_tree().get_nodes_in_group("dashable_barrier"):
+		if b is PhysicsBody2D:
+			if on:
+				add_collision_exception_with(b)
+			else:
+				remove_collision_exception_with(b)
 
 
 # Re-apply boon-driven stat changes that need re-application after a boon pick:
