@@ -943,7 +943,7 @@ var owned_slots_by_char: Dictionary = {
 # heatwave "Y" for attack-tint purposes; treating those as slot boons would
 # wrongly evict real slot picks.)
 func get_slot_for_boon(boon_id: String) -> String:
-	return String(BOON_POOL.get(boon_id, {}).get("boon_slot", ""))
+	return BoonDBClass.get_slot_for_boon(boon_id)
 
 # Boon levels (boon_id -> int, default 1). Level 2 = one free Pom applied.
 var boon_levels: Dictionary = {}
@@ -976,7 +976,7 @@ func get_duo_offer_chance() -> float:
 const BOON_ATTACK_SLOT = BoonDBClass.BOON_ATTACK_SLOT
 
 func is_attack_boon(boon_id: String) -> bool:
-	return BOON_ATTACK_SLOT.has(boon_id)
+	return BoonDBClass.is_attack_boon(boon_id)
 
 # ============================================================
 # Run 44 — EFFECT-PREREQ GATING (Bruno's spec, this session):
@@ -1053,12 +1053,7 @@ var boon_rarities: Dictionary = {}
 # Base rarity: legendary/corrupt/duo keep their fixed tier; everything else
 # (including legacy "uncommon"/"rare" pool entries) is common.
 func get_base_rarity(boon_id: String) -> String:
-	if boon_id.begins_with("duo:"):
-		return "duo"   # Run 41 — duo cards are a fixed tier, never rolled
-	var br: String = String(BOON_POOL.get(boon_id, {}).get("rarity", "common"))
-	if br == "legendary" or br == "corrupt":
-		return br
-	return "common"
+	return BoonDBClass.get_base_rarity(boon_id)
 
 
 # Run 41 — Sensei Z "Dragon's Fortune": each rank pushes EVERY upgrade
@@ -1119,10 +1114,7 @@ func get_boon_effect_mult(boon_id: String) -> float:
 # Run 44 — slot trade-up: rarity ladder bump (fixed tiers never bump).
 const _RARITY_LADDER = BoonDBClass._RARITY_LADDER
 func bump_rarity(r: String) -> String:
-	var i: int = _RARITY_LADDER.find(r)
-	if i == -1:
-		return r
-	return _RARITY_LADDER[min(i + 1, _RARITY_LADDER.size() - 1)]
+	return BoonDBClass.bump_rarity(r)
 
 
 # True if taking `boon_id` would replace a DIFFERENT boon in `who`'s slot.
@@ -4198,10 +4190,10 @@ const DOOR_LEGENDARY_CHANCE = BoonDBClass.DOOR_LEGENDARY_CHANCE
 
 # Family display colors mirror FAM_COLOR but exposed for DoorChoice UI.
 func get_family_color(family: String) -> Color:
-	return FAM_COLOR.get(family, Color(0.85, 0.85, 0.85))
+	return BoonDBClass.get_family_color(family)
 
 func get_rarity_color(rarity: String) -> Color:
-	return RARITY_COLOR.get(rarity, Color(0.85, 0.85, 0.85))
+	return BoonDBClass.get_rarity_color(rarity)
 
 
 # --- Preview builders (single source of truth for the labels) -------------

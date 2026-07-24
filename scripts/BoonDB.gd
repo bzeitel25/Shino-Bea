@@ -2018,3 +2018,45 @@ const STEAM_BURST_PUFF_RADIUS:   float = 100.0    # 2m ≈ 100px
 const STEAM_BURST_BLIND_DUR:     float = 1.5      # 1.5s puff per spec
 const THAW_BURST_FLAT_DMG: int = 10               # proxy for +15% on Frostbitten
 
+# ============================================================
+# BoonDB query helpers — pure lookups/derivations over the data
+# tables (Phase 2 B2). Moved verbatim from RunState.gd; RunState
+# keeps a one-line delegating wrapper for each (name/signature
+# unchanged). These read ONLY BoonDB consts + their args — no
+# mutable RunState state, no autoload side effects.
+# ============================================================
+
+# Family display colors mirror FAM_COLOR but exposed for DoorChoice UI.
+static func get_family_color(family: String) -> Color:
+	return FAM_COLOR.get(family, Color(0.85, 0.85, 0.85))
+
+static func get_rarity_color(rarity: String) -> Color:
+	return RARITY_COLOR.get(rarity, Color(0.85, 0.85, 0.85))
+
+# Resolve a boon's slot from its explicit boon_slot field ONLY. (Do NOT fall
+# back to BOON_ATTACK_SLOT — that map tags passives like static_charge "A" or
+# heatwave "Y" for attack-tint purposes; treating those as slot boons would
+# wrongly evict real slot picks.)
+static func get_slot_for_boon(boon_id: String) -> String:
+	return String(BOON_POOL.get(boon_id, {}).get("boon_slot", ""))
+
+static func is_attack_boon(boon_id: String) -> bool:
+	return BOON_ATTACK_SLOT.has(boon_id)
+
+# Base rarity: legendary/corrupt/duo keep their fixed tier; everything else
+# (including legacy "uncommon"/"rare" pool entries) is common.
+static func get_base_rarity(boon_id: String) -> String:
+	if boon_id.begins_with("duo:"):
+		return "duo"   # Run 41 — duo cards are a fixed tier, never rolled
+	var br: String = String(BOON_POOL.get(boon_id, {}).get("rarity", "common"))
+	if br == "legendary" or br == "corrupt":
+		return br
+	return "common"
+
+# Run 44 — slot trade-up: rarity ladder bump (fixed tiers never bump).
+static func bump_rarity(r: String) -> String:
+	var i: int = _RARITY_LADDER.find(r)
+	if i == -1:
+		return r
+	return _RARITY_LADDER[min(i + 1, _RARITY_LADDER.size() - 1)]
+
