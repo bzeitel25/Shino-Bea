@@ -2758,12 +2758,7 @@ func biomes_cleared_count() -> int:
 	return n
 
 func add_coins(amount: int) -> void:
-	run_coins = max(0, run_coins + amount)
-	# Nudge HUDs that show a coin counter.
-	if Engine.get_main_loop() is SceneTree:
-		for h in (Engine.get_main_loop() as SceneTree).get_nodes_in_group("hud"):
-			if h.has_method("refresh_coin_counter"):
-				h.refresh_coin_counter()
+	EconomyState.add_coins(amount)   # P2-B4b: body → scripts/EconomyState.gd
 
 # Dream-room exit roll (Run 45 cadence) — keyed to biome_room:
 #   next room 4 (DreamBiomes.MINIBOSS_ROOM)  → forced MINI-BOSS door
@@ -2826,7 +2821,7 @@ var sensei_speed_pct:   float = 0.0   # +5% move speed per tier; max 5 → +25%
 const SENSEI_CHI_PER_RANK_PER_SEC: float = 0.2
 
 func get_sensei_chi_regen_rate() -> float:
-	return float(sensei_chi_regen) * SENSEI_CHI_PER_RANK_PER_SEC
+	return EconomyState.get_sensei_chi_regen_rate()   # P2-B4b: body → scripts/EconomyState.gd
 # Run 46 — five new training nodes.
 var sensei_pocket_ranks: int  = 0     # Deep Pockets: +25 starting coins/rank; max 5
 var sensei_haggle_ranks: int  = 0     # Haggler's Tongue: -5% shop prices/rank; max 5
@@ -2839,11 +2834,11 @@ var rerolls_left: int = 0
 
 # Haggler's Tongue — discounted shop price (floors at 1 coin).
 func get_shop_price(base: int) -> int:
-	return max(1, int(round(float(base) * (1.0 - 0.05 * float(sensei_haggle_ranks)))))
+	return EconomyState.get_shop_price(base)   # P2-B4b: body → scripts/EconomyState.gd
 
 # Sibling Bond — revive fill-rate multiplier (circle AND channel).
 func get_sensei_revive_mult() -> float:
-	return 1.0 + 0.15 * float(sensei_revive_ranks)
+	return EconomyState.get_sensei_revive_mult()   # P2-B4b: body → scripts/EconomyState.gd
 
 var sensei_rarity_ranks: int  = 0     # Run 41 — Dragon's Fortune: +5% per rank to
 									  # EACH rarity-upgrade chance (unc/rare/epic);
@@ -2857,55 +2852,11 @@ var sensei_duo_ranks:       int = 0   # Run 42 — Twin Spirits: +2%/rank Duo ro
 # heal both Shino + Bea by 50% of their respective max HP. Returns total heal.
 # Safe-no-op for downed characters and missing scene refs.
 func _apply_sensei_upgrades() -> void:
-	# Called at the end of reset_run(). Applies persistent Sensei Z bonuses
-	# to the freshly-reset run state.
-	if sensei_extra_dd > 0:
-		shino_dd_charges += sensei_extra_dd
-		bea_dd_charges   += sensei_extra_dd
-	if sensei_dr_pct > 0.0:
-		damage_taken_mult *= max(0.0, 1.0 - sensei_dr_pct)
-	# Run 46 — Swift Wings now actually applies: fold into the shared move-speed
-	# multiplier (covers walk, dash and charge moves for both heroes).
-	if sensei_speed_pct > 0.0:
-		move_speed_mult *= (1.0 + sensei_speed_pct)
-	# Run 46 — Deep Pockets: head-start coin purse.
-	if sensei_pocket_ranks > 0:
-		run_coins += sensei_pocket_ranks * 25
-	# Run 46 — Fated Reroll: refill run-scoped reroll charges.
-	rerolls_left = sensei_reroll_ranks
+	EconomyState._apply_sensei_upgrades()   # P2-B4b: body → scripts/EconomyState.gd
 
 
 func grant_apple_juice(tree: SceneTree) -> int:
-	apple_juice_consumed_count += 1
-	var total: int = 0
-	if tree == null:
-		return total
-	# Players in the "player" group includes Shino + Bea; iterate distinct nodes.
-	var seen: Dictionary = {}
-	for grp in ["player", "bea"]:
-		for p in tree.get_nodes_in_group(grp):
-			if p == null or not is_instance_valid(p):
-				continue
-			if seen.has(p):
-				continue
-			seen[p] = true
-			var max_hp: int = 100
-			if p.has_method("get_effective_max_hp"):
-				max_hp = p.get_effective_max_hp()
-			elif "max_hp" in p:
-				max_hp = p.max_hp
-			var heal: int = max(1, int(round(float(max_hp) * APPLE_JUICE_HEAL_PCT)))
-			if p.has_method("heal_external"):
-				p.heal_external(heal)
-				total += heal
-				# Run 27 — Baked Apple duo: 50% heal > 10% threshold → ignite
-				# the nearest enemy within 200px of the healed hero.
-				if p is Node2D:
-					baked_apple_duo_ignite(tree, p.global_position)
-	print("[RunState] Apple Juice consumed — %d total HP restored across heroes (consumed_count=%d)" % [
-		total, apple_juice_consumed_count,
-	])
-	return total
+	return EconomyState.grant_apple_juice(tree)   # P2-B4b: body → scripts/EconomyState.gd
 
 
 # ---------------------------------------------------------------------------
