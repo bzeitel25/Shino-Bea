@@ -704,3 +704,73 @@ static func get_stomp_combo_line_length(combo_count: int) -> float:
 # Broccoli + Potato — Earthshaker.
 static func earthshaker_active() -> bool:
 	return RunState.is_duo_active("broccoli_potato")
+
+
+# ===========================================================================
+# Rarity / level query getters (P2-B5a — the deferred stateful-getter batch).
+# Read boon STATE (boon_rarities / boon_levels / current_offer_rarities /
+# sensei_rarity_ranks) via RunState.; rarity tables via BoonDB.; the RunState-native
+# Economy const SENSEI_RARITY_BONUS_PER_RANK via RunState. Intra-cluster calls route
+# through the RunState facade (delegate → static), so no ordering dependency.
+# ===========================================================================
+
+# Run 41 — Sensei Z "Dragon's Fortune": each rank pushes every upgrade chance +5%.
+static func get_rarity_chance_bonus() -> float:
+	return RunState.SENSEI_RARITY_BONUS_PER_RANK * float(RunState.sensei_rarity_ranks)
+
+
+# One rarity roll: base epic 10% / rare 20% / uncommon 30% / common 40%, each shifted
+# up by the Dragon's Fortune bonus.
+static func roll_rarity() -> String:
+	var bonus: float = RunState.get_rarity_chance_bonus()
+	var c_epic: float = BoonDB.RARITY_CHANCE_EPIC + bonus
+	var c_rare: float = BoonDB.RARITY_CHANCE_RARE + bonus
+	var c_unc:  float = BoonDB.RARITY_CHANCE_UNCOMMON + bonus
+	var r: float = randf()
+	if r < c_epic:
+		return "epic"
+	if r < c_epic + c_rare:
+		return "rare"
+	if r < c_epic + c_rare + c_unc:
+		return "uncommon"
+	return "common"
+
+
+# Roll the on-card rarity for one offer slot (fixed tiers pass through).
+static func roll_offer_rarity_for(boon_id: String) -> String:
+	var base: String = RunState.get_base_rarity(boon_id)
+	if base != "common":
+		return base
+	return RunState.roll_rarity()
+
+
+# Rarity shown on the current offer card for this boon.
+static func get_offer_rarity(boon_id: String) -> String:
+	return String(RunState.current_offer_rarities.get(boon_id, RunState.get_base_rarity(boon_id)))
+
+
+# Rarity the boon was TAKEN at (falls back to base for legacy saves).
+static func get_boon_rarity(boon_id: String) -> String:
+	return String(RunState.boon_rarities.get(boon_id, RunState.get_base_rarity(boon_id)))
+
+
+static func get_boon_rarity_mult(boon_id: String) -> float:
+	return float(BoonDB.RARITY_EFFECT_MULT.get(RunState.get_boon_rarity(boon_id), 1.0))
+
+
+# Combined effect-bonus multiplier: rarity x Dragon Fruit levels.
+# Callers scale the BONUS portion: 1.0 + base_bonus * get_boon_effect_mult(id).
+static func get_boon_effect_mult(boon_id: String) -> float:
+	return RunState.get_boon_rarity_mult(boon_id) * RunState.get_boon_level_mult(boon_id)
+
+
+# Run 40 — Dragon Fruit level (1 = base, no bonus).
+static func get_boon_level(boon_id: String) -> int:
+	return int(RunState.boon_levels.get(boon_id, 1))
+
+
+# Per-level bonus scales with the boon's ROLLED rarity (common +10% … epic +20%).
+static func get_boon_level_mult(boon_id: String) -> float:
+	var lvl: int = RunState.get_boon_level(boon_id)
+	var per_level: float = float(BoonDB.RARITY_LEVEL_BONUS.get(RunState.get_boon_rarity(boon_id), 0.10))
+	return 1.0 + per_level * float(max(0, lvl - 1))

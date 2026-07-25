@@ -1063,52 +1063,38 @@ func get_base_rarity(boon_id: String) -> String:
 const SENSEI_RARITY_BONUS_PER_RANK: float = 0.05
 
 func get_rarity_chance_bonus() -> float:
-	return SENSEI_RARITY_BONUS_PER_RANK * float(sensei_rarity_ranks)
+	return BoonEffects.get_rarity_chance_bonus()   # P2-B5a: body → BoonEffects.gd
 
 
 # One rarity roll: base epic 10% / rare 20% / uncommon 30% / common 40%,
 # each chance shifted up by the Dragon's Fortune bonus.
 func roll_rarity() -> String:
-	var bonus: float = get_rarity_chance_bonus()
-	var c_epic: float = RARITY_CHANCE_EPIC + bonus
-	var c_rare: float = RARITY_CHANCE_RARE + bonus
-	var c_unc:  float = RARITY_CHANCE_UNCOMMON + bonus
-	var r: float = randf()
-	if r < c_epic:
-		return "epic"
-	if r < c_epic + c_rare:
-		return "rare"
-	if r < c_epic + c_rare + c_unc:
-		return "uncommon"
-	return "common"
+	return BoonEffects.roll_rarity()   # P2-B5a: body → BoonEffects.gd
 
 
 # Roll the on-card rarity for one offer slot (fixed tiers pass through).
 func roll_offer_rarity_for(boon_id: String) -> String:
-	var base: String = get_base_rarity(boon_id)
-	if base != "common":
-		return base
-	return roll_rarity()
+	return BoonEffects.roll_offer_rarity_for(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 # Rarity shown on the current offer card for this boon.
 func get_offer_rarity(boon_id: String) -> String:
-	return String(current_offer_rarities.get(boon_id, get_base_rarity(boon_id)))
+	return BoonEffects.get_offer_rarity(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 # Rarity the boon was TAKEN at (falls back to base for legacy saves).
 func get_boon_rarity(boon_id: String) -> String:
-	return String(boon_rarities.get(boon_id, get_base_rarity(boon_id)))
+	return BoonEffects.get_boon_rarity(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 func get_boon_rarity_mult(boon_id: String) -> float:
-	return float(RARITY_EFFECT_MULT.get(get_boon_rarity(boon_id), 1.0))
+	return BoonEffects.get_boon_rarity_mult(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 # Combined effect-bonus multiplier: rarity x Dragon Fruit levels.
 # Callers scale the BONUS portion: 1.0 + base_bonus * get_boon_effect_mult(id).
 func get_boon_effect_mult(boon_id: String) -> float:
-	return get_boon_rarity_mult(boon_id) * get_boon_level_mult(boon_id)
+	return BoonEffects.get_boon_effect_mult(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 # Run 44 — slot trade-up: rarity ladder bump (fixed tiers never bump).
@@ -2321,13 +2307,11 @@ func clear_bea_carry() -> void:
 # rarity (Run 40): common +10% / uncommon +12% / rare +15% / epic +20%.
 # ---------------------------------------------------------------------------
 func get_boon_level(boon_id: String) -> int:
-	return int(boon_levels.get(boon_id, 1))
+	return BoonEffects.get_boon_level(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 func get_boon_level_mult(boon_id: String) -> float:
-	var lvl: int = get_boon_level(boon_id)
-	var per_level: float = float(RARITY_LEVEL_BONUS.get(get_boon_rarity(boon_id), 0.10))
-	return 1.0 + per_level * float(max(0, lvl - 1))
+	return BoonEffects.get_boon_level_mult(boon_id)   # P2-B5a: body → BoonEffects.gd
 
 
 func apply_dragon_fruit_to_boon(boon_id: String, levels_up: int = 1) -> void:
