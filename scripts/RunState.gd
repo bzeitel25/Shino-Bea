@@ -59,6 +59,25 @@ const HERO_BODY_Z: int = 2
 const BARRIER_OVERHANG_Z: int = 3
 const HERO_DASH_Z: int = 4
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase-2 ARCHITECTURE MAP (2026-07-24) — where the logic lives
+# ─────────────────────────────────────────────────────────────────────────────
+# RunState is the run's STATE OWNER + facade. Pure and query logic was extracted
+# into sibling modules; RunState keeps a same-name delegating wrapper for each, so
+# every external `RunState.*` call still resolves unchanged:
+#   • BoonDB.gd       — pure data tables (BOON_POOL / DUO_DEFS / rarity tables …) + data queries
+#   • BoonEffects.gd  — per-boon effect + rarity/level getters (roll_crit_mult, get_boon_effect_mult …)
+#   • DayState.gd     — town visual tier / family karma banking / sensei-lore-from-healing
+#   • EconomyState.gd — coins / shop price / sensei permanent upgrades / apple-juice team heal
+#
+# INTENTIONAL EXCEPTION — the write-heavy run-flow ORCHESTRATORS stay HERE by design.
+# They are the state owner mutating its own ~80 vars; extracting them would only add
+# indirection + risk with no dedup gain (see REFACTOR_HANDOFF.md → "P2-B5 RunFlow —
+# RECOMMENDATION"). If you're hunting for one, it's in THIS file:
+#   apply_boon (the ~520-line boon dispatcher) · roll_offer / roll_family_offer ·
+#   take_duo · resolve_team_down (+ DD) · roll_room_exits / roll_dream_room_exits / roll_door_pair
+# ═════════════════════════════════════════════════════════════════════════════
+
 # ── Phase-2 B1 facade: pure-data tables live on BoonDB; RunState re-exports
 # each moved const under its original name so all RunState.<CONST> refs resolve.
 const BoonDBClass = preload("res://scripts/BoonDB.gd")
@@ -1781,6 +1800,9 @@ func _pick_corrupt_for_family(fam_name: String) -> String:
 
 # ---------------------------------------------------------------------------
 # Apply a chosen boon.
+# NOTE (2026-07-24): apply_boon INTENTIONALLY lives on RunState, not a module —
+# it is the run's central state mutator (writes ~80 vars). Kept here on purpose;
+# see the Phase-2 ARCHITECTURE MAP at the top of this file.
 # ---------------------------------------------------------------------------
 func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 	if not BOON_POOL.has(boon_id):
