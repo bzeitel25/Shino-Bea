@@ -26,3 +26,10 @@ Assets/
 *.clean
 *truncated_backup
 *.depren
+
+# --- Run 169 (2026-08-20): local pre-run snapshots are redundant now git is live ---
+# They also SHADOW class_name (a stale _backup_pre_run167/DayState.gd broke the build).
+_backup_pre_run*/
+_to_delete/
+_orig_pre_run*/
+*.tgz
