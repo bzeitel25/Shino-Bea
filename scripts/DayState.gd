@@ -30,6 +30,54 @@ static func town_visual_tier() -> int:
 	return 0
 
 
+# ---------------------------------------------------------------------------
+# Run 167 — CARNIVAL GATE (Bruno's spec, 2026-08-19)
+# The Dragon Fruit troupe only rolls into town once the island is visibly on
+# the mend. Two conditions, both required:
+#   1. the town itself has left Delapidated  (town_visual_tier() >= 1), and
+#   2. NOT ONE family is still Rotten        (every family tier >= 1).
+# Ripe-across-the-board was too steep; this lands around "several families at
+# Wilted or better", which is where the town art flips anyway.
+# [TUNE] CARNIVAL_MIN_FAMILY_TIER is the knob if it opens too early / too late.
+#
+# ⚠ Run 167b: RunState.carnival_open() / .dragonfruit_tier() delegate here, so
+# these two MUST exist. Godot caches `class_name` scripts, so if you add a new
+# static to this file while the editor is open you will get
+# `Static function "..." not found in base "DayState"` until the project is
+# reloaded (Project → Reload Current Project). It is not a code error.
+# ---------------------------------------------------------------------------
+const CARNIVAL_MIN_FAMILY_TIER: int = 1
+
+static func carnival_open() -> bool:
+	if RunState.town_visual_tier() < 1:
+		return false
+	for fam in BoonDB.FAMILIES:
+		if RunState.get_family_tier(String(fam)) < CARNIVAL_MIN_FAMILY_TIER:
+			return false
+	return true
+
+
+# How far along the Dragon Fruit troupe's own healing reads. They sit OUTSIDE
+# the karma loop (Family_Roster §4.11: no boons, no karma track), so their art
+# tier is derived from the island instead of deposited karma:
+#   0 Rotten   — carnival still shut
+#   1 Unripe   — carnival just opened
+#   2 Ripe     — every family Ripe or better
+#   3 Restored — every family Restored
+# [TUNE] Bruno: swap this for a real karma track whenever Dragon Fruit gets one.
+static func dragonfruit_tier() -> int:
+	if not RunState.carnival_open():
+		return 0
+	var lowest: int = 3
+	for fam in BoonDB.FAMILIES:
+		lowest = mini(lowest, RunState.get_family_tier(String(fam)))
+	if lowest >= 3:
+		return 3
+	if lowest >= 2:
+		return 2
+	return 1
+
+
 # Call ONCE at the end of a run (win OR defeat), BEFORE reset_run() wipes
 # boons_taken. Both call sites: RunComplete._finalize_run() and
 # Shino._reload_arena1(). Corrupt boons bank nothing.
@@ -48,7 +96,7 @@ static func bank_run_karma() -> void:
 		var cap: int = RunState.karma_needed_for_tier(RunState.get_family_tier(fam))
 		RunState.karma_banked[fam] = mini(cur + int(gained[fam]), cap)
 	if not gained.is_empty():
-		print("[RunState] Karma banked (hidden): %s" % str(gained))
+		Log.dbg("[RunState] Karma banked (hidden): %s" % str(gained))
 
 
 static func get_family_tier(fam: String) -> int:
@@ -80,7 +128,7 @@ static func deposit_karma(fam: String) -> Dictionary:
 		RunState.family_tier[fam] = tier
 		out["tier_up"] = true
 		out["new_tier"] = tier
-		print("[RunState] The %s family healed to %d." % [fam, tier])
+		Log.dbg("[RunState] The %s family healed to %d." % [fam, tier])
 	RunState.karma_progress[fam] = prog
 	# Run 142 — re-evaluate Sensei's lore tier whenever karma is deposited
 	RunState.update_sensei_lore_from_healing()
@@ -119,4 +167,4 @@ static func update_sensei_lore_from_healing() -> void:
 	var computed: int = RunState.compute_sensei_lore_tier()
 	if computed > RunState.sensei_lore_tier:
 		RunState.sensei_lore_tier = computed
-		print("[RunState] Sensei lore tier advanced to %d (healing score: %.1f)" % [computed, RunState.island_healing_score()])
+		Log.dbg("[RunState] Sensei lore tier advanced to %d (healing score: %.1f)" % [computed, RunState.island_healing_score()])

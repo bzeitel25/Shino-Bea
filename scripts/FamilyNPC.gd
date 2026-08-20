@@ -68,6 +68,22 @@ const NAME_TO_MEMBER := {
 	"Alliam":       "alliam",
 	"Lottie":       "lottie",
 	"Pearl":        "pearl",
+	# Run 167 — Dragon Fruit (carnival troupe, Family_Roster §4.11)
+	"Madame Nova":  "nova",
+	"Pitaya":       "pitaya",
+	"Jangles":      "jangles",
+	"Tally":        "tally",
+	# Run 167 — townsfolk sliced in Run 149, first placed in Run 167
+	"Rind":         "banana_r2",
+	"Nurse Nib":    "banana_r4",
+	"Crown":        "broccoli_r4",
+	"Fletcher":     "carrot_r2",
+	"Spyglass Sal": "carrot_r4",
+	"Sentry Sable": "grape_r4",
+	"Basket Bo":    "onion_r4",
+	"Cook Chilo":   "pepper_r4",
+	"Digger Dell":  "potato_r4",
+	"Tray Tilda":   "melon_r4",
 }
 
 # Members whose idle is a PROFILE stance (no front-facing frames in the art):

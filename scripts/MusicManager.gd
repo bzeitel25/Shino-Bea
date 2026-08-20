@@ -26,8 +26,14 @@ const AREA_FOLDERS: Dictionary = {
 	# Non-biome areas (wired later as tracks land)
 	"menu":     "Menu",
 	"dojo":     "Dojo",
-	"town":     "TownSquare",
+	# Town has two moods with their own folders: the daytime waking-world Town
+	# Square (TownSquare.gd) and the nighttime Dream World hub (DreamHub.gd).
+	"town_day":   "Town_Day",
+	"town_night": "Town_Night",
+	"town":       "Town_Night",   # legacy alias → night (old single-folder key)
 	"gauntlet": "Gauntlet_TownDefense",
+	# Run 167 — the Dragon Fruit Carnival grounds (day only).
+	"carnival":   "Carnival",
 	"sensei":   "SenseiZ_FinalFight",
 }
 

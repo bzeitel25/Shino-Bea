@@ -108,7 +108,7 @@ func _build_heal_pickup() -> void:
 	_heal_node.add_child(icon)
 
 	var lbl := Label.new()
-	lbl.text = "[E] FINAL JUICE — full restock before the duel"
+	InputGlyphs.bind_label(lbl, "[{interact}] FINAL JUICE — full restock before the duel")   # Run 158
 	lbl.add_theme_font_size_override("font_size", 14)
 	lbl.add_theme_color_override("font_color", Color(0.40, 0.85, 0.95))
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
@@ -203,7 +203,7 @@ func _start_fight() -> void:
 	if banner:
 		banner.text = "⚔️ SHADOW SENSEI Z ⚔️\n\"You carry my teachings... let's see if you understood them.\""
 	FX.screen_shake(FX.SHAKE_LIGHT, 0.4)
-	print("[ShadowSenseiArena] Shadow Sensei Z spawned.")
+	Log.dbg("[ShadowSenseiArena] Shadow Sensei Z spawned.")
 
 
 # Run 71 — build an AnimatedSprite2D from the keyed GIF sheet and hang it on
@@ -275,7 +275,7 @@ func _on_victory() -> void:
 	if banner:
 		banner.text = "✦ THE SHADOW LIFTS ✦\n🐉 +%d Dragon Souls (%d total) — the island sleeps easy tonight." % [
 			VICTORY_SPARKS, RunState.dragon_souls]
-	print("[ShadowSenseiArena] Shadow Sensei Z defeated — run WON. +%d sparks." % VICTORY_SPARKS)
+	Log.dbg("[ShadowSenseiArena] Shadow Sensei Z defeated — run WON. +%d sparks." % VICTORY_SPARKS)
 	# Run 70 — clear the resume path BEFORE this save so the few seconds of
 	# victory-hold + fade (before RunComplete loads and fully finalizes) can't be
 	# closed-then-relaunched back into this duel to re-farm the spark. From the

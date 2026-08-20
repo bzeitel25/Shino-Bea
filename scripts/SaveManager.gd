@@ -21,6 +21,11 @@ extends Node
 const SAVE_DIR: String = "user://saves/"
 const SLOT_COUNT: int  = 3
 
+## Bumped when the save dictionary's shape changes in a way readers must know
+## about. Written into every slot from Phase 3 onward; files written before
+## this existed simply report 0 and are still loaded normally.
+const SCHEMA_VERSION: int = 1
+
 var active_slot: int = -1
 
 
@@ -29,29 +34,39 @@ func _ready() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Slot file path
+# Slot file paths
 # ---------------------------------------------------------------------------
 func _slot_path(slot: int) -> String:
 	return SAVE_DIR + "slot_%d.json" % slot
 
 
+## Previous good copy, rotated in on every successful write.
+func _backup_path(slot: int) -> String:
+	return SAVE_DIR + "slot_%d.bak" % slot
+
+
+## Scratch file the new save is fully written and verified in before it is
+## allowed to replace the real one.
+func _temp_path(slot: int) -> String:
+	return SAVE_DIR + "slot_%d.tmp" % slot
+
+
 # ---------------------------------------------------------------------------
 # Query
 # ---------------------------------------------------------------------------
+## A slot counts as occupied if EITHER the live file or its backup exists —
+## otherwise a slot whose live file was corrupted would look empty and the
+## player could overwrite a save that is still recoverable.
 func is_slot_empty(slot: int) -> bool:
-	return not FileAccess.file_exists(_slot_path(slot))
+	return not FileAccess.file_exists(_slot_path(slot)) \
+		and not FileAccess.file_exists(_backup_path(slot))
 
 
 func get_slot_info(slot: int) -> Dictionary:
 	if is_slot_empty(slot):
 		return {}
-	var file := FileAccess.open(_slot_path(slot), FileAccess.READ)
-	if not file:
-		return {}
-	var text := file.get_as_text()
-	file.close()
-	var parsed = JSON.parse_string(text)
-	if typeof(parsed) != TYPE_DICTIONARY:
+	var parsed: Dictionary = _read_slot_dict(slot)
+	if parsed.is_empty():
 		return {}
 	return parsed.get("meta", {})
 
@@ -60,7 +75,12 @@ func get_slot_info(slot: int) -> Dictionary:
 # Create new slot (blank run, just name + date)
 # ---------------------------------------------------------------------------
 func create_new_slot(slot: int, save_name: String) -> void:
+	# A brand-new file must not inherit a previous save's backup — otherwise a
+	# later corruption would "recover" into the wrong player's run.
+	_quiet_remove(_backup_path(slot))
+	_quiet_remove(_temp_path(slot))
 	var data := {
+		"schema_version": SCHEMA_VERSION,
 		"meta": {
 			"name": save_name,
 			"save_date": Time.get_date_string_from_system(),
@@ -131,8 +151,14 @@ func save_active_slot() -> void:
 		"boons_count": rs.boons_taken.size(),
 		"dragon_souls": rs.dragon_souls,
 	}
-	_write_slot(active_slot, {"meta": meta, "run": run_dict})
-	print("[SaveManager] Saved slot %d (%s) — arena %d" % [active_slot, meta["name"], rs.arenas_cleared])
+	var ok: bool = _write_slot(active_slot,
+		{"schema_version": SCHEMA_VERSION, "meta": meta, "run": run_dict})
+	if ok:
+		Log.dbg("[SaveManager] Saved slot %d (%s) — arena %d"
+			% [active_slot, meta["name"], rs.arenas_cleared])
+	else:
+		push_error("[SaveManager] SAVE FAILED for slot %d — previous save preserved."
+			% active_slot)
 
 
 # ---------------------------------------------------------------------------
@@ -142,14 +168,10 @@ func load_slot(slot: int) -> bool:
 	if is_slot_empty(slot):
 		push_warning("[SaveManager] Tried to load empty slot %d." % slot)
 		return false
-	var file := FileAccess.open(_slot_path(slot), FileAccess.READ)
-	if not file:
-		return false
-	var text := file.get_as_text()
-	file.close()
-	var parsed = JSON.parse_string(text)
-	if typeof(parsed) != TYPE_DICTIONARY:
-		push_warning("[SaveManager] Could not parse slot %d." % slot)
+	# Reads the live file, transparently falling back to .bak if it is corrupt.
+	var parsed: Dictionary = _read_slot_dict(slot)
+	if parsed.is_empty():
+		push_error("[SaveManager] Slot %d is unreadable and has no usable backup." % slot)
 		return false
 	active_slot = slot
 	var rs := get_node_or_null("/root/RunState")
@@ -160,7 +182,7 @@ func load_slot(slot: int) -> bool:
 	var settings := get_node_or_null("/root/Settings")
 	if settings and settings.has_method("sync_ai_tier_from_runstate"):
 		settings.sync_ai_tier_from_runstate()
-	print("[SaveManager] Loaded slot %d." % slot)
+	Log.dbg("[SaveManager] Loaded slot %d." % slot)
 	return true
 
 
@@ -168,12 +190,14 @@ func load_slot(slot: int) -> bool:
 # Delete a slot
 # ---------------------------------------------------------------------------
 func delete_slot(slot: int) -> void:
-	var path := _slot_path(slot)
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
+	# Remove every artefact of the slot — leaving .bak behind would make the
+	# slot report as occupied again on the next is_slot_empty() check.
+	_quiet_remove(_slot_path(slot))
+	_quiet_remove(_backup_path(slot))
+	_quiet_remove(_temp_path(slot))
 	if active_slot == slot:
 		active_slot = -1
-	print("[SaveManager] Deleted slot %d." % slot)
+	Log.dbg("[SaveManager] Deleted slot %d." % slot)
 
 
 # ---------------------------------------------------------------------------
@@ -183,25 +207,22 @@ func copy_slot(from_slot: int, to_slot: int) -> void:
 	if is_slot_empty(from_slot):
 		push_warning("[SaveManager] copy_slot: source slot %d is empty." % from_slot)
 		return
-	var src := _slot_path(from_slot)
-	var dst := _slot_path(to_slot)
-	# Read source, patch meta name so the copy is clearly labeled.
-	var file := FileAccess.open(src, FileAccess.READ)
-	if not file:
+	# Read source through the resilient reader (so copying a slot whose live
+	# file went bad still works from its backup), then write the copy through
+	# the atomic writer rather than a raw FileAccess.WRITE.
+	var parsed: Dictionary = _read_slot_dict(from_slot)
+	if parsed.is_empty():
+		push_error("[SaveManager] copy_slot: source slot %d is unreadable." % from_slot)
 		return
-	var text := file.get_as_text()
-	file.close()
-	var parsed = JSON.parse_string(text)
-	if typeof(parsed) == TYPE_DICTIONARY:
-		var meta: Dictionary = parsed.get("meta", {}).duplicate()
-		meta["name"] = meta.get("name", "Save") + " (copy)"
-		meta["save_date"] = Time.get_date_string_from_system()
-		parsed["meta"] = meta
-		var out := FileAccess.open(dst, FileAccess.WRITE)
-		if out:
-			out.store_string(JSON.stringify(parsed, "\t"))
-			out.close()
-	print("[SaveManager] Copied slot %d → slot %d." % [from_slot, to_slot])
+	var meta: Dictionary = parsed.get("meta", {}).duplicate()
+	meta["name"] = meta.get("name", "Save") + " (copy)"
+	meta["save_date"] = Time.get_date_string_from_system()
+	parsed["meta"] = meta
+	parsed["schema_version"] = SCHEMA_VERSION
+	if _write_slot(to_slot, parsed):
+		Log.dbg("[SaveManager] Copied slot %d → slot %d." % [from_slot, to_slot])
+	else:
+		push_error("[SaveManager] copy_slot: could not write slot %d." % to_slot)
 
 
 # ---------------------------------------------------------------------------
@@ -212,10 +233,116 @@ func _get_slot_name(slot: int) -> String:
 	return info.get("name", "Save %d" % (slot + 1))
 
 
-func _write_slot(slot: int, data: Dictionary) -> void:
-	var file := FileAccess.open(_slot_path(slot), FileAccess.WRITE)
-	if not file:
-		push_error("[SaveManager] Could not write slot %d." % slot)
-		return
-	file.store_string(JSON.stringify(data, "\t"))
+# ---------------------------------------------------------------------------
+# ATOMIC SLOT WRITE  (Phase 3a)
+# ---------------------------------------------------------------------------
+# The old implementation opened the real slot file with FileAccess.WRITE and
+# streamed JSON straight into it. A crash, power cut or OneDrive sync collision
+# part-way through left a truncated file, load_slot() failed to parse it, and
+# that slot's entire meta-progression — dragon souls, sensei upgrades, karma,
+# family restoration, tutorial state — was gone with no way back.
+#
+# Now: write to .tmp, prove it parses, rotate the old file to .bak, then swap
+# .tmp into place. The real slot file is only ever replaced by a whole, valid
+# file, and the previous good save survives as .bak for one generation.
+#
+# Failure at any step leaves the existing save untouched.
+#
+# Returns true on success so callers can react; existing callers ignore it,
+# which is fine.
+func _write_slot(slot: int, data: Dictionary) -> bool:
+	var real_path: String = _slot_path(slot)
+	var tmp_path: String  = _temp_path(slot)
+	var bak_path: String  = _backup_path(slot)
+	var payload: String   = JSON.stringify(data, "\t")
+
+	# --- 1. Write the scratch file ---
+	var file := FileAccess.open(tmp_path, FileAccess.WRITE)
+	if file == null:
+		push_error("[SaveManager] Could not open temp file for slot %d (err %d)."
+			% [slot, FileAccess.get_open_error()])
+		return false
+	file.store_string(payload)
+	file.flush()
 	file.close()
+
+	# --- 2. Verify it round-trips before it is allowed near the real save ---
+	if not _file_parses(tmp_path):
+		push_error("[SaveManager] Slot %d temp file failed verification — "
+			% slot + "existing save left untouched.")
+		_quiet_remove(tmp_path)
+		return false
+
+	# --- 3. Rotate the current save to .bak ---
+	if FileAccess.file_exists(real_path):
+		_quiet_remove(bak_path)
+		var rot_err: int = DirAccess.rename_absolute(real_path, bak_path)
+		if rot_err != OK:
+			# Non-fatal: we just lose the backup generation, not the new save.
+			push_warning("[SaveManager] Could not rotate slot %d to .bak (err %d)."
+				% [slot, rot_err])
+
+	# --- 4. Swap the verified temp into place ---
+	var err: int = DirAccess.rename_absolute(tmp_path, real_path)
+	if err != OK:
+		push_error("[SaveManager] Could not commit slot %d (err %d)." % [slot, err])
+		# Put the old save back so the player is not left with nothing.
+		if not FileAccess.file_exists(real_path) and FileAccess.file_exists(bak_path):
+			DirAccess.rename_absolute(bak_path, real_path)
+		_quiet_remove(tmp_path)
+		return false
+
+	return true
+
+
+## True when `path` exists and contains a parseable JSON dictionary.
+func _file_parses(path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return false
+	var text := f.get_as_text()
+	f.close()
+	if text.strip_edges() == "":
+		return false
+	return typeof(JSON.parse_string(text)) == TYPE_DICTIONARY
+
+
+func _quiet_remove(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+
+
+# ---------------------------------------------------------------------------
+# Resilient read — real file first, .bak if the real one is unreadable.
+# ---------------------------------------------------------------------------
+## Returns the parsed slot dictionary, or {} if neither copy is usable.
+func _read_slot_dict(slot: int) -> Dictionary:
+	var real_path: String = _slot_path(slot)
+	if _file_parses(real_path):
+		var f := FileAccess.open(real_path, FileAccess.READ)
+		if f != null:
+			var text := f.get_as_text()
+			f.close()
+			var parsed = JSON.parse_string(text)
+			if typeof(parsed) == TYPE_DICTIONARY:
+				return parsed
+
+	# Real file is missing or corrupt — fall back to the previous good write.
+	var bak_path: String = _backup_path(slot)
+	if _file_parses(bak_path):
+		push_warning("[SaveManager] Slot %d unreadable — recovered from backup." % slot)
+		var bf := FileAccess.open(bak_path, FileAccess.READ)
+		if bf != null:
+			var btext := bf.get_as_text()
+			bf.close()
+			var bparsed = JSON.parse_string(btext)
+			if typeof(bparsed) == TYPE_DICTIONARY:
+				# Promote the backup so the next boot reads it directly.
+				var copy := FileAccess.open(real_path, FileAccess.WRITE)
+				if copy != null:
+					copy.store_string(btext)
+					copy.flush()
+					copy.close()
+				return bparsed
+
+	return {}

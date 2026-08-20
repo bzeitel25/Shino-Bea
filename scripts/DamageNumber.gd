@@ -47,6 +47,23 @@ func show_damage(damage: int) -> void:
 	var rs: Node = get_node_or_null("/root/RunState")
 	if rs != null and rs.has_method("get_display_crit_tier"):
 		tier = int(rs.get_display_crit_tier())
+
+	# ---------------------------------------------------------------
+	# Phase 6a — damage number visibility (0 All / 1 Crits only / 2 Off)
+	# ---------------------------------------------------------------
+	# Gated HERE because every spawn site in the game (Enemy, BossEnemy,
+	# Boss2Enemy, MonsterRig, ...) funnels through setup() -> show_damage().
+	# One check covers all of them, and none of those files had to change.
+	#
+	# The crit tier is resolved above first, so "Crits only" can keep the
+	# numbers that actually matter to a Carrot build while silencing the
+	# chip-damage spam.
+	var st: Node = get_node_or_null("/root/Settings")
+	if st != null and "damage_number_mode" in st:
+		var mode: int = int(st.damage_number_mode)
+		if mode == 2 or (mode == 1 and tier < 1):
+			queue_free()
+			return
 	if tier >= 2:
 		text = str(damage) + "!"
 		add_theme_font_size_override("font_size", 30)

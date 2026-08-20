@@ -57,6 +57,8 @@ var _nav_cooldown_t: float = 0.0
 
 
 func _ready() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	_build_ui()
 	_refresh_slots()
 	_update_focus()
@@ -159,6 +161,8 @@ func _build_ui() -> void:
 
 
 func _build_name_dialog() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	_name_dialog = Control.new()
 	_name_dialog.anchor_right  = 1.0
 	_name_dialog.anchor_bottom = 1.0
@@ -219,6 +223,8 @@ func _build_name_dialog() -> void:
 
 
 func _build_copy_panel() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	_copy_panel = Control.new()
 	_copy_panel.anchor_right  = 1.0
 	_copy_panel.anchor_bottom = 1.0
@@ -326,6 +332,11 @@ func _process(delta: float) -> void:
 	if _name_dialog.visible:
 		_nav_held_dir = 0
 		return
+	# Phase 1-3 sweep: this screen polls Input directly, so an open confirm
+	# dialog (Delete Save) would otherwise keep moving the slot cursor behind it.
+	if ConfirmPopup.is_open():
+		_nav_held_dir = 0
+		return
 	if _nav_cooldown_t > 0.0:
 		_nav_cooldown_t -= delta
 	# Poll Input singleton — immune to stick wobble.
@@ -363,6 +374,9 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Phase 1-3 sweep — the dialog owns all input while it is up.
+	if ConfirmPopup.is_open():
+		return
 	if _name_dialog.visible:
 		if event.is_action_pressed("ui_cancel"):
 			_on_name_cancel_pressed()
@@ -468,7 +482,7 @@ func _do_scene_change() -> void:
 	if rs and rs.get("resume_scene_path") != null:
 		resume_path = String(rs.resume_scene_path)
 	if resume_path != "" and ResourceLoader.exists(resume_path):
-		print("[SaveFileSelect] Resuming saved run at: %s" % resume_path)
+		Log.dbg("[SaveFileSelect] Resuming saved run at: %s" % resume_path)
 		get_tree().change_scene_to_file(resume_path)
 		return
 	# New game or legacy save with no resume path.
@@ -476,7 +490,7 @@ func _do_scene_change() -> void:
 	var _rs: Node = get_node_or_null("/root/RunState")
 	if _rs and not _rs.tutorial_completed:
 		if ResourceLoader.exists(TUTORIAL_PATH):
-			print("[SaveFileSelect] New game — starting tutorial.")
+			Log.dbg("[SaveFileSelect] New game — starting tutorial.")
 			get_tree().change_scene_to_file(TUTORIAL_PATH)
 			return
 		push_warning("[SaveFileSelect] TutorialRoom.tscn not found — falling through to Dojo.")
@@ -522,8 +536,19 @@ func _on_delete_pressed() -> void:
 	var slot := _focused_idx if _focused_idx < 3 else 0
 	if SaveManager.is_slot_empty(slot):
 		return
+	# Phase 3c — deleting a save was a single unprotected button press.
+	# Name the file in the prompt so there is no doubt which one goes.
+	var info: Dictionary = SaveManager.get_slot_info(slot)
+	var save_name: String = String(info.get("name", "Slot %d" % (slot + 1)))
+	ConfirmPopup.request(self, "DELETE SAVE?",
+		"\"%s\" will be permanently erased.\nThis cannot be undone." % save_name,
+		"DELETE", Callable(self, "_do_delete_slot").bind(slot), true)
+
+
+func _do_delete_slot(slot: int) -> void:
 	SaveManager.delete_slot(slot)
 	_refresh_slot_label(slot)
+	_update_focus()
 
 
 func _on_copy_pressed() -> void:
@@ -563,45 +588,27 @@ func _on_back_pressed() -> void:
 # Style helpers
 # ===========================================================================
 
-func _apply_slot_style(btn: Button, focused: bool) -> void:
-	var border := COLOR_GOLD_BRIGHT if focused else COLOR_GOLD_BORDER
-	var bw     := 3 if focused else 2
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.12, 0.11, 0.16, 0.96) if focused else COLOR_PANEL
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		sb.set_border_width(side, bw)
-	sb.border_color = border
-	sb.corner_radius_top_left    = 8; sb.corner_radius_top_right    = 8
-	sb.corner_radius_bottom_left = 8; sb.corner_radius_bottom_right = 8
-	if focused:
-		sb.shadow_color = Color(COLOR_GOLD_BRIGHT.r, COLOR_GOLD_BRIGHT.g, COLOR_GOLD_BRIGHT.b, 0.40)
-		sb.shadow_size  = 8
-	btn.add_theme_stylebox_override("normal",  sb)
-	btn.add_theme_stylebox_override("hover",   sb)
-	btn.add_theme_stylebox_override("focus",   sb)
-	btn.add_theme_stylebox_override("pressed", sb)
+# Run 166 (Bruno fix) — these three helpers used to paint the pre-164 dark-gold
+# StyleBoxFlats. But _update_focus() re-runs them on EVERY cursor move, so the
+# first thing a Down press did was overwrite the "Ink & Washi" plaques that
+# skin_tree_deferred() had just applied — the menu snapped back to the old look.
+# They now delegate to the shared UISkin plaque skin, so re-applying them on
+# focus changes keeps the updated look instead of fighting it. Focus itself is
+# carried by Godot's own "focus" plaque stylebox: the selected node already
+# calls grab_focus() in _update_focus(), so we don't hand-swap styleboxes here.
+
+func _apply_slot_style(btn: Button, _focused: bool) -> void:
+	# Wide save-slot plaque. No seal — a centre-left 忍 stamp would float in the
+	# empty gutter beside a 640 px panel (this is why skin_tree skips seals on
+	# non-vertical-menu buttons too). The idle→focus plaque swap is the cue.
+	UISkin.skin_button(btn, "", UISkin.SIZE_ROW)
 
 
 func _apply_action_style(btn: Button) -> void:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.10, 0.09, 0.13, 0.94)
-	for side in [SIDE_LEFT, SIDE_RIGHT, SIDE_TOP, SIDE_BOTTOM]:
-		sb.set_border_width(side, 2)
-	sb.border_color = COLOR_GOLD_BORDER
-	sb.corner_radius_top_left    = 6; sb.corner_radius_top_right    = 6
-	sb.corner_radius_bottom_left = 6; sb.corner_radius_bottom_right = 6
-	sb.content_margin_left = 10; sb.content_margin_right = 10
-	sb.content_margin_top  = 8;  sb.content_margin_bottom = 8
-	btn.add_theme_stylebox_override("normal",  sb)
-	btn.add_theme_stylebox_override("hover",   sb.duplicate())
-	btn.add_theme_stylebox_override("focus",   sb.duplicate())
-	btn.add_theme_stylebox_override("pressed", sb.duplicate())
-	btn.add_theme_color_override("font_color",       COLOR_GOLD_BORDER)
-	btn.add_theme_color_override("font_hover_color", COLOR_GOLD_BRIGHT)
-	btn.add_theme_color_override("font_focus_color", COLOR_GOLD_BRIGHT)
-	btn.add_theme_font_size_override("font_size", 18)
+	UISkin.skin_button(btn, "", UISkin.SIZE_ROW)
 
 
 func _apply_action_style_focused(btn: Button) -> void:
-	_apply_action_style(btn)
-	btn.add_theme_color_override("font_color", COLOR_GOLD_BRIGHT)
+	# Focus visual comes from Godot's focus plaque (the caller grabs focus first);
+	# the skin is identical to the idle state so nothing to add.
+	UISkin.skin_button(btn, "", UISkin.SIZE_ROW)

@@ -74,7 +74,7 @@ func _build_title() -> void:
 	const HINT = preload("res://scripts/HintPopup.gd")
 	var tier_str: String = FL.tier_name(RunState.get_family_tier(_family))
 	HINT.show_hint(self, "The %s Family Home" % _family,
-		"%s  •  Talk to the family to learn their story  •  Press E to interact" % tier_str)
+		"%s  •  Talk to the family to learn their story  •  Press {interact} to interact" % tier_str)
 
 
 func _build_decor(fam_col: Color) -> void:
@@ -316,7 +316,7 @@ func _add_interactable(host: Node2D, kind: String, id: String, action: String) -
 	host.add_child(zone)
 
 	var prompt := Label.new()
-	prompt.text = "[E] %s" % action
+	InputGlyphs.bind_label(prompt, "[{interact}] %s" % action)   # Run 158 — live device glyph
 	prompt.add_theme_font_size_override("font_size", 14)
 	prompt.add_theme_color_override("font_color", Color(1.0, 1.0, 0.7))
 	prompt.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.0))

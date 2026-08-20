@@ -179,10 +179,42 @@ func make_cone_poly(parent: Node, origin: Vector2, dir: Vector2,
 func flash_fire(poly: Polygon2D) -> void:
 	if poly == null or not is_instance_valid(poly):
 		return
-	poly.color = Color(FIRE_COLOR.r, FIRE_COLOR.g, FIRE_COLOR.b, 0.85)
+	# Phase 6a — photosensitivity. This is the brightest single moment in the
+	# game: the telegraph going off. Scaling only the ALPHA keeps the shape and
+	# colour (and therefore the RED danger-read locked in Run 122) fully intact
+	# while letting a sensitive player take the punch out of the flash.
+	# Default 1.0 = unchanged.
+	var fm: float = _flash_mult()
+	poly.color = Color(FIRE_COLOR.r, FIRE_COLOR.g, FIRE_COLOR.b, 0.85 * fm)
 	var edge: Line2D = poly.get_node_or_null("Edge") as Line2D
 	if edge:
-		edge.default_color = Color(FIRE_COLOR.r, FIRE_COLOR.g, FIRE_COLOR.b, 1.0)
+		edge.default_color = Color(FIRE_COLOR.r, FIRE_COLOR.g, FIRE_COLOR.b, 1.0 * fm)
+
+
+# ---------------------------------------------------------------------------
+# ⚠ FLOOR — a cosmetic setting must never hide a danger cue
+# ---------------------------------------------------------------------------
+# The telegraph fire flash is GAMEPLAY-CRITICAL information: it is the "this is
+# happening NOW" read on an incoming attack. Scaling its alpha straight from the
+# slider meant Flash Intensity 0 made it fully transparent — an accessibility
+# option silently turning into a difficulty increase.
+#
+# So the 0..1 slider maps onto MIN_FLASH_MULT..1.0 instead of 0..1. At the
+# lowest setting the flash is dimmed hard but still plainly visible; at the
+# default it is bit-identical to the pre-Phase-6 build.
+#
+# Purely decorative flashes may use Settings.get_flash_mult() raw. Anything the
+# player has to REACT to goes through this floor.
+const MIN_FLASH_MULT: float = 0.45
+
+
+## Player's flash-intensity preference, floored so the danger read survives.
+## Returns 1.0 when Settings isn't up yet.
+func _flash_mult() -> float:
+	var s: Node = get_node_or_null("/root/Settings")
+	if s != null and s.has_method("get_flash_mult"):
+		return lerpf(MIN_FLASH_MULT, 1.0, clampf(float(s.get_flash_mult()), 0.0, 1.0))
+	return 1.0
 
 
 # Add a crisp border outline as a child Line2D so the zone edge is readable.

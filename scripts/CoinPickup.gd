@@ -92,7 +92,7 @@ func _build_visual() -> void:
 	add_child(_glow_ring)
 
 	_prompt_label = Label.new()
-	_prompt_label.text = "Press [E] to collect"
+	InputGlyphs.bind_label(_prompt_label, "Press [{interact}] to collect")   # Run 158 — live device glyph
 	_prompt_label.add_theme_font_size_override("font_size", 14)
 	_prompt_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.7))
 	_prompt_label.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.0))
@@ -152,8 +152,10 @@ func _collect() -> void:
 	RunState.add_coins(_pre_rolled_amount)
 	if get_node_or_null("/root/FX") != null:
 		FX.spawn_burst_particles(global_position, Color(1.0, 0.85, 0.30), 26)
-		FX.play_sound("boon_pickup_spawn", 1.0)
-	print("[CoinPickup] +%d coins (%d total)." % [_pre_rolled_amount, RunState.run_coins])
+		# Phase 2a — coins get their own bright ding rather than borrowing the
+		# generic boon-spawn cue (which has no audio wired yet anyway).
+		FX.play_sound("coin_pickup", 1.0)
+	Log.dbg("[CoinPickup] +%d coins (%d total)." % [_pre_rolled_amount, RunState.run_coins])
 	emit_signal("coins_collected", _pre_rolled_amount)
 	queue_free()
 

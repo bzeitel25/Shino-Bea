@@ -24,6 +24,8 @@ extends RefCounted
 
 static func add_coins(amount: int) -> void:
 	RunState.run_coins = max(0, RunState.run_coins + amount)
+	# Phase 4 — track earnings only (negative amounts are spends, not income).
+	StatsState.note_coins(RunState.run_stats, amount)
 	# Nudge HUDs that show a coin counter.
 	if Engine.get_main_loop() is SceneTree:
 		for h in (Engine.get_main_loop() as SceneTree).get_nodes_in_group("hud"):
@@ -95,7 +97,7 @@ static func grant_apple_juice(tree: SceneTree) -> int:
 				# the nearest enemy within 200px of the healed hero.
 				if p is Node2D:
 					RunState.baked_apple_duo_ignite(tree, p.global_position)
-	print("[RunState] Apple Juice consumed — %d total HP restored across heroes (consumed_count=%d)" % [
+	Log.dbg("[RunState] Apple Juice consumed — %d total HP restored across heroes (consumed_count=%d)" % [
 		total, RunState.apple_juice_consumed_count,
 	])
 	return total

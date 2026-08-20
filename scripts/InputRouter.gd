@@ -30,11 +30,35 @@ extends Node
 
 const KEYBOARD_DEVICE: int = -1
 
+# ---------------------------------------------------------------------------
+# Run N+2b — THE REMOTE DEVICE
+# ---------------------------------------------------------------------------
+# An online partner is just another device id. The host receives their input
+# packet, calls inject_remote(), and from that moment Bea reads device 900
+# through the exact same pressed()/move_vector() calls she uses for a gamepad
+# plugged into the host's own PC. No hero code knows the difference.
+#
+# 900 is chosen to sit far above any plausible real joypad id so it can never
+# collide with hardware Godot enumerates.
+#
+# Unlike a real device, 900 is NOT polled from hardware — it is PUSHED in from
+# the network at ~30 Hz. move_vector()/aim_vector() therefore read the stored
+# values below instead of calling Input.get_joy_axis().
+const NET_DEVICE_REMOTE: int = 900
+
+var _remote_move: Vector2 = Vector2.ZERO
+var _remote_aim: Vector2 = Vector2.ZERO
+
 # Button-style actions tracked per device (edge + held). Movement and aim are
 # polled directly (see move_vector / aim_vector) and are NOT in this list.
+#
+# ui_accept / ui_cancel were added in Run N+2b: menus (character select in
+# particular) need to route a remote player's confirm and back presses, and a
+# remote player produces no InputEvents to read them from.
 const TRACKED_ACTIONS: Array = [
 	"attack_y", "attack_x", "attack_a", "dash", "ult",
 	"swap_character", "interact", "pause", "reroll", "boon_inspect",
+	"ui_accept", "ui_cancel",
 ]
 
 const MOVE_DEADZONE: float = 0.2
@@ -108,6 +132,9 @@ func just_released(device: int, action: String) -> bool:
 # Analog / movement queries (polled live)
 # ---------------------------------------------------------------------------
 func move_vector(device: int) -> Vector2:
+	# Pushed in from the network, not polled from hardware.
+	if device == NET_DEVICE_REMOTE:
+		return _remote_move
 	if device == KEYBOARD_DEVICE:
 		var x: float = 0.0
 		var y: float = 0.0
@@ -125,6 +152,8 @@ func move_vector(device: int) -> Vector2:
 
 
 func aim_vector(device: int) -> Vector2:
+	if device == NET_DEVICE_REMOTE:
+		return _remote_aim
 	# Keyboard has no right stick — callers fall back to facing/movement.
 	if device == KEYBOARD_DEVICE:
 		return Vector2.ZERO
@@ -134,6 +163,38 @@ func aim_vector(device: int) -> Vector2:
 	if v.length() < AIM_DEADZONE:
 		return Vector2.ZERO
 	return v
+
+
+# ---------------------------------------------------------------------------
+# Run N+2b — remote input injection (HOST SIDE ONLY)
+# ---------------------------------------------------------------------------
+# Called by NetInput once per received packet. `held` is action -> bool for the
+# actions in TRACKED_ACTIONS; anything absent is treated as released.
+#
+# Writing straight into _held means the existing edge detection just works: the
+# end-of-physics-frame snapshot in _physics_process() gives device 900 the same
+# just_pressed / just_released semantics as any pad, for free.
+#
+# NOTE: packets arrive at ~30 Hz while physics runs at 60, so a press and its
+# release can land in the same packet. NetInput handles that on the sending
+# side by latching any press that happened since the last send, so a fast tap is
+# never swallowed — see NetInput._collect().
+func inject_remote(held: Dictionary, move: Vector2, aim: Vector2) -> void:
+	for action in TRACKED_ACTIONS:
+		_held[_key(NET_DEVICE_REMOTE, action)] = bool(held.get(action, false))
+	# Defensive: the network layer clamps these too, but a stray value here would
+	# hand a hero an impossible movement vector.
+	_remote_move = move.limit_length(1.0)
+	_remote_aim = aim.limit_length(1.0)
+
+
+# On disconnect, release everything the remote player was holding. Without this
+# a friend who drops mid-dash leaves the dash button stuck down forever.
+func clear_remote() -> void:
+	for action in TRACKED_ACTIONS:
+		_held[_key(NET_DEVICE_REMOTE, action)] = false
+	_remote_move = Vector2.ZERO
+	_remote_aim = Vector2.ZERO
 
 
 # ---------------------------------------------------------------------------

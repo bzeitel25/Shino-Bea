@@ -256,7 +256,7 @@ const EFFECT_APPLIERS: Dictionary = {
 		"inferno_charge", "heatwave", "pyromania", "inferno_blossom", "corrupt_pepper"],
 	# Soaked/Chilled sources (Watermelon slots + Ult)
 	"wet": ["hydro_jab", "heavy_tide", "bubble_shot", "hydro_slide",
-		"flood_charge", "tidal_surge", "corrupt_watermelon"],
+		"flood_charge", "tidal_surge", "corrupt_watermelon", "lingering_tide"],
 	# Poison sources (Onion slots + aura + Ult + corrupt)
 	"poison": ["pungent_jab", "tear_strike", "stink_bomb", "gas_bookends",
 		"reek_charge", "layered_defense", "miasma_burst", "corrupt_onion"],
@@ -867,7 +867,12 @@ const BOON_POOL: Dictionary = {
 		"family": "Broccoli",
 		"name":   "Heavy Stalk",
 		"boon_slot": "Y",   # Run 44
-		"desc":   "+15% Y damage\n+10% Y attack speed.",
+		# Run 156 — text fix: the +15% damage arm IS Y-only
+		# (BoonEffects.get_heavy_stalk_mult gates on is_primary), but the attack
+		# -speed arm lives in get_char_attack_speed_mult and applies to ALL
+		# attacks. Card now matches the code rather than the other way round —
+		# a Y-only speed arm would need slot context the speed getter doesn't have.
+		"desc":   "+15% Y damage\n+10% attack speed.",
 		"color":  Color(0.20, 0.65, 0.30),
 		"rarity": "common",
 		"stackable": false,
@@ -1171,11 +1176,28 @@ const BOON_POOL: Dictionary = {
 	"bubble_shot": {
 		"family": "Watermelon",
 		"name":   "Seed Spit",
-		"desc":   "Ranged: +10% damage,\n2 Soaked + splash knocks\nback nearby enemies\n+ slowing puddle.",
+		"desc":   "Ranged: +10% damage,\n2 Soaked + splash knocks\nback nearby enemies.",
 		"color":  Color(0.30, 0.70, 0.90),
 		"rarity": "uncommon",
 		"stackable": false,
 		"boon_slot": "A",
+	},
+	# Run 162 (Bruno) — the puddle that used to be bolted onto Seed Spit, promoted
+	# to a passive that pools EVERY splash the family produces. Makes Seed Spit a
+	# clean "splash + knockback" A-slot and gives the puddle its own pick.
+	#
+	# Deliberately NOT stacking with the two boons that already carry their own
+	# pool — Hydro Slide's dash puddle and Summer's End's detonation puddle are
+	# part of those cards' identity and are left untouched, so there is no
+	# double-spawn. This passive adds pooling to the splashes that had none:
+	# Seed Spit, Wave Crash death-bursts and Geyser Charge.
+	"lingering_tide": {
+		"family": "Watermelon",
+		"name":   "Lingering Tide",
+		"desc":   "Every splash leaves a\nslowing puddle behind\n(1 Chilled/sec, 3s).",
+		"color":  Color(0.30, 0.70, 0.90),
+		"rarity": "uncommon",
+		"stackable": false,
 	},
 	"hydration": {
 		"family": "Watermelon",
@@ -1958,7 +1980,7 @@ const STONE_THROW_DMG_BONUS:   float = 0.60
 const QUAKE_CHARGE_RADIUS:     float = 80.0
 const SHELL_BREAKER_VULN_DUR: float = 5.0
 const NUTSHELL_RADIUS:        float = 90.0
-const NUTSHELL_BASH_DURATION: float = 0.4
+const NUTSHELL_BASH_DURATION: float = 0.3   # Run 157 — was 0.4; card says 0.3s
 const BATTLE_SHELL_DURATION:  float = 3.0    # spec: 3s base, +1s per Pom level
 const COMBAT_FURY_MAX_TIERS: int = 5
 const COMBAT_FURY_DECAY_SEC: float = 3.0

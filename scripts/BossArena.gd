@@ -31,7 +31,7 @@ var _victory_started: bool = false
 
 
 func _ready() -> void:
-	print("[BossArena] _ready — spawning Shadow Commander.")
+	Log.dbg("[BossArena] _ready — spawning Shadow Commander.")
 	if get_node_or_null("/root/FX") and FX.has_method("fade_from_black"):
 		FX.fade_from_black(0.45)
 	call_deferred("_spawn_boss")
@@ -74,7 +74,7 @@ func _on_boss_killed() -> void:
 		return
 	_victory_started = true
 	# Run 43 — no spark in training mode (Dream World mini-bosses/bosses drop them).
-	print("[BossArena] Boss defeated. Chaining to Arena 11.")
+	Log.dbg("[BossArena] Boss defeated. Chaining to Arena 11.")
 	if banner_label:
 		banner_label.text = "✦ BOSS DOWN ✦"
 		banner_label.modulate = Color(1.0, 0.92, 0.40, 1.0)

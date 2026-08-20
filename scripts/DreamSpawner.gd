@@ -166,7 +166,7 @@ func _spawn_wave() -> void:
 
 	_wave_active = true
 	_poll_timer = POLL_INTERVAL
-	print("[DreamSpawner] %s room %d — %d enemies (tier %d), reinforcement budget %d, cap %d." % [
+	Log.dbg("[DreamSpawner] %s room %d — %d enemies (tier %d), reinforcement budget %d, cap %d." % [
 		_biome_id, _room, total, _tier, _reinforce_budget, _max_concurrent])
 
 
@@ -551,5 +551,5 @@ func _check_wave_cleared() -> void:
 		# Coin drip on every dream wave clear.
 		var drip: int = randi_range(RunState.COIN_WAVE_DRIP_MIN, RunState.COIN_WAVE_DRIP_MAX)
 		RunState.add_coins(drip)
-		print("[DreamSpawner] Wave cleared (+%d coins, %d total)." % [drip, RunState.run_coins])
+		Log.dbg("[DreamSpawner] Wave cleared (+%d coins, %d total)." % [drip, RunState.run_coins])
 		emit_signal("wave_cleared")

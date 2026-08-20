@@ -30,7 +30,7 @@ var _glow_core: ColorRect = null
 
 func _ready() -> void:
 	# Big Broccoli: widen the beam by 1.5×.
-	beam_width *= RunState.get_big_broccoli_aoe_mult()
+	beam_width *= RunState.get_big_broccoli_aoe_mult("shino")
 
 	collision_layer = 8   # PlayerHitbox
 	collision_mask = 4    # Enemy
@@ -137,6 +137,7 @@ func _deal_tick() -> void:
 		var proximity: float = clamp(1.0 - dist_from_origin / beam_length, 0.0, 1.0)
 		var final_dmg: int = max(1, int(round(scaled * (1.0 + proximity))))
 		body.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
+		FX.hit_rumble("shino")
 		body.take_damage(final_dmg, direction)
 		hits += 1
 		if was_alive and body.has_method("is_alive") and not body.is_alive():

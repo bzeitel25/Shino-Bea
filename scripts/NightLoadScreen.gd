@@ -24,6 +24,8 @@ const ART_PATHS: Array = [
 ]
 
 func _ready() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	_build_screen()
 	FX.fade_from_black(0.8)
 	await get_tree().create_timer(HOLD_SECONDS).timeout
@@ -31,6 +33,10 @@ func _ready() -> void:
 
 
 func _goto_dream() -> void:
+	# Phase 4 — this is the one gate every run passes through on its way out of
+	# the Dojo, so it is where the run clock starts. begin_run() is idempotent
+	# (only the first call sticks), so a mid-run scene reload can't restart it.
+	StatsState.begin_run(RunState.run_stats)
 	var target: String = DREAM_HUB_PATH if RunState.dream_world_mode else ARENA1_PATH
 	if not ResourceLoader.exists(target):
 		push_error("[NightLoadScreen] Target scene not found: %s" % target)

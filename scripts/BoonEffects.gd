@@ -29,34 +29,40 @@ static func roll_crit_mult(attack_type: String = "", who: String = "shino") -> f
 	# Chaos Carrot (corrupt): 50% flat crit, but crit damage = 1.0 (no bonus).
 	# Run 139 — taker only.
 	if RunState.char_has("corrupt_carrot", who):
-		RunState.finisher_crit_chance_bonus = 0.0
+		RunState.consume_finisher_crit_bonus(who)
 		if randf() < 0.50:
 			RunState.last_crit_result = true
 			RunState._set_crit_tier(1)
 			return 1.0
 		return 1.0
 
-	var hawk_lvl: float = RunState.get_boon_level_mult("hawkeye") if RunState.hawkeye_taken else 1.0
-	var effective_crit_dmg: float = RunState.crit_damage_bonus * hawk_lvl
+	# Run 156 — Hawkeye / Keen Eye / Sharpened Tip / Bullseye are picker-only.
+	# These four read GLOBAL `*_taken` flags and the global crit_chance /
+	# crit_damage_bonus accumulators, so one ninja's Carrot picks buffed the
+	# other's crits too. All four now gate on `who`, and the flat accumulators
+	# come from that hero's own bank (RunState.crit_*_by).
+	var hawk_lvl: float = RunState.get_boon_level_mult("hawkeye") if RunState.char_has("hawkeye", who) else 1.0
+	var effective_crit_dmg: float = RunState.get_crit_damage_bonus_for(who) * hawk_lvl
 
 	var type_chance_add: float = 0.0
 	match attack_type:
 		"primary":
-			if RunState.keen_eye_taken:
+			if RunState.char_has("keen_eye", who):
 				type_chance_add    += 0.15
 				effective_crit_dmg += 0.10
 		"heavy":
-			if RunState.sharpened_tip_taken:
+			if RunState.char_has("sharpened_tip", who):
 				type_chance_add    += 0.25
 				effective_crit_dmg += 0.20
 		"ranged":
-			if RunState.bullseye_taken:
+			if RunState.char_has("bullseye", who):
 				type_chance_add    += 0.20
 				effective_crit_dmg += 0.30
 
 	# Run 27 — Heavy Crit duo (Broccoli+Carrot): all charge attacks guaranteed crit.
+	# Run 156 — arm the CASTER's token, not the shared global.
 	if attack_type == "charge" and RunState.is_duo_active("broccoli_carrot"):
-		RunState.force_next_crit = true
+		RunState.arm_force_crit(who)
 
 	# Run 27b — Headshot duo (Carrot+Potato): Ingrained → +25% crit chance/damage.
 	var _ingr: bool = RunState.shino_ingrained if who == "shino" else RunState.bea_ingrained
@@ -71,16 +77,16 @@ static func roll_crit_mult(attack_type: String = "", who: String = "shino") -> f
 		effective_crit_dmg += _pa_crit
 
 	# 1. Forced-crit gate (Opening Strike, Golden Carrot finisher).
-	if RunState.force_next_crit:
-		RunState.force_next_crit = false
+	# Run 156 — per-hero token, so Bea can no longer eat the crit Shino armed.
+	var _finisher_bonus: float = RunState.consume_finisher_crit_bonus(who)
+	if RunState.consume_force_crit(who):
 		RunState.last_crit_result = true
 		RunState._set_crit_tier(2)   # guaranteed crit = Mega-Crit (RED)
 		return 1.5 + effective_crit_dmg
 
 	# 2. Chance-based crit.
-	var effective_chance: float = RunState.crit_chance + RunState.finisher_crit_chance_bonus + RunState.sensei_crit_pct + type_chance_add \
+	var effective_chance: float = RunState.get_crit_chance_for(who) + _finisher_bonus + RunState.sensei_crit_pct + type_chance_add \
 		+ RunState.get_burning_aim_crit_chance_bonus()   # Run 27 — Burning Aim arm 2
-	RunState.finisher_crit_chance_bonus = 0.0   # consume bonus after each roll
 	if effective_chance > 0.0 and randf() < effective_chance:
 		RunState.last_crit_result = true
 		RunState._set_crit_tier(1)   # rolled crit (ORANGE)
@@ -254,6 +260,12 @@ static func get_sweet_dreams_heal_pct(who: String = "shino") -> float:
 
 
 # Apple Granny's Recipe heal amp.
+# ⚠ Run 156 — DEAD DUPLICATE, DO NOT WIRE UP. Granny's Recipe is live via
+# get_heal_mult(who) below, which is picker-only (_pick_has) and is what
+# HeroBase.heal_external actually calls. This getter returns the legacy GLOBAL
+# heal_amp_mult accumulator: reconnecting it would both double the +30% and
+# leak it to the ninja who didn't pick the boon. Kept only so the RunState
+# facade signature stays intact for old saves/callers.
 static func get_heal_amp() -> float:
 	return RunState.heal_amp_mult
 
@@ -483,8 +495,13 @@ static func get_hulk_smash_charge_mult() -> float:
 static func get_hulk_smash_windup_mult() -> float:
 	return BoonDB.HULK_SMASH_WINDUP_MULT if RunState.hulk_smash_taken else 1.0
 # Big Broccoli — +50% AoE on all charge attacks.
-static func get_big_broccoli_aoe_mult() -> float:
-	return 1.5 if RunState.big_broccoli_taken else 1.0
+# Run 157 — picker-only. Was reading the global big_broccoli_taken, so one
+# ninja's pick widened the OTHER ninja's charge AoE too. `who` defaults to ""
+# (team-wide) only for legacy callers that genuinely have no hero context.
+static func get_big_broccoli_aoe_mult(who: String = "") -> float:
+	if who == "":
+		return 1.5 if RunState.big_broccoli_taken else 1.0
+	return 1.5 if RunState.char_has("big_broccoli", who) else 1.0
 
 
 # Run 131 — Fury Release (Broccoli Charge): +40% charge hitbox/AoE for the owner.
@@ -557,32 +574,75 @@ static func tide_master_refund(base_cost: int, who: String = "") -> int:
 
 
 # Cluster Mastery / Cluster Cascade read-only getters.
-static func get_cluster_mastery_double_chance(combo: int) -> float:
-	if not RunState.cluster_mastery_taken:
+# Run 157 — both are picker-only now. They read global flags (and, for Cascade,
+# a single shared pair of prime timers), so one ninja's pick paid out on the
+# other's hits and Shino's X finisher primed Bea's Y.
+static func get_cluster_mastery_double_chance(combo: int, who: String = "") -> float:
+	if not RunState.char_has("cluster_mastery", who if who != "" else "shino"):
 		return 0.0
 	return minf(0.30, float(combo) * 0.01)
 
-static func get_cluster_cascade_mult(is_y_finisher: bool) -> float:
-	if not RunState.cluster_cascade_taken:
+static func get_cluster_cascade_mult(is_y_finisher: bool, who: String = "shino") -> float:
+	if not RunState.char_has("cluster_cascade", who):
 		return 1.0
-	if is_y_finisher and RunState._cluster_cascade_x_primed > 0.0:
+	if is_y_finisher and RunState.get_cascade_x_primed(who) > 0.0:
 		return 1.50
-	if not is_y_finisher and RunState._cluster_cascade_y_primed > 0.0:
+	if not is_y_finisher and RunState.get_cascade_y_primed(who) > 0.0:
 		return 1.25
 	return 1.0
 
 
 # Overripe — Poison max stacks.
+# Run 156 — was a SECOND, disagreeing formula for Overripe's poison cap
+# (min(10, 5+1+lvl)) with no callers, while the live path is
+# StatusComponent's `def.max_stacks + RunState.poison_max_stacks_bonus`.
+# Now derived from that same accumulator so the two can never drift apart.
 static func get_overripe_poison_max() -> int:
 	if not RunState.overripe_taken:
 		return 5
-	var lvl: int = RunState.get_boon_level("overripe")
-	return min(10, 5 + 1 + lvl)
+	return min(10, 5 + RunState.poison_max_stacks_bonus)
 
 
 # ---------------------------------------------------------------------------
 # Spineback — 30% retaliation earth-spike on damage taken (picker-only).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Run 156 — Tailwind (Banana passive). Card: "+5% dodge, move & attack speed.
+# GL: lightning dmg instead of dodge." The two speed arms were already wired in
+# RunState.get_char_attack_speed_mult / get_char_move_speed_mult; these two are
+# the dodge arm and its Greased-Lightning replacement, which were never coded.
+# Both are picker-only and share the same rarity-scaled tailwind_pct.
+# ---------------------------------------------------------------------------
+static func get_tailwind_dodge_chance(who: String = "shino") -> float:
+	if not RunState.char_has("tailwind", who):
+		return 0.0
+	if RunState.greased_lightning_mode:
+		return 0.0   # GL trades the dodge for lightning damage
+	return RunState.tailwind_pct
+
+static func get_tailwind_lightning_mult(who: String = "shino") -> float:
+	if not RunState.char_has("tailwind", who) or not RunState.greased_lightning_mode:
+		return 1.0
+	return 1.0 + RunState.tailwind_pct
+
+
+# ---------------------------------------------------------------------------
+# Run 156 — Potato "earth damage" slot arms. Rock Smash's "+30% earth dmg on X"
+# and Spud Stomp's "+15% earth dmg on Y" had BoonDB constants
+# (ROCK_SMASH_EARTH_BONUS / SPUD_STOMP_EARTH_BONUS) but no read site — only
+# their secondary arms (Cracked Soil stack / Ground Pound) were wired.
+# Picker-only; slot-gated so the two never stack on one attack.
+# (STONE_THROW_DMG_BONUS stays intentionally unused — Stone Throw's second
+# projectile IS its damage increase, per RunState.get_ranged_damage_mult.)
+# ---------------------------------------------------------------------------
+static func get_earth_slot_dmg_mult(who: String, attack_type: String) -> float:
+	if attack_type == "primary" and RunState.char_has("spud_stomp", who):
+		return 1.0 + BoonDB.SPUD_STOMP_EARTH_BONUS * RunState.get_boon_effect_mult("spud_stomp")
+	if attack_type == "heavy" and RunState.char_has("rock_smash", who):
+		return 1.0 + BoonDB.ROCK_SMASH_EARTH_BONUS * RunState.get_boon_effect_mult("rock_smash")
+	return 1.0
+
+
 static func spineback_retaliate(incoming_dmg: int, who: String = "shino") -> int:
 	if not RunState.char_has("spineback", who) or incoming_dmg <= 0:
 		return 0

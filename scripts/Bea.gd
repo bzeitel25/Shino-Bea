@@ -26,16 +26,31 @@ const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glid
 # Bea is purple (placeholder art).
 # ============================================================
 
-@export var move_speed: float = 230.0
-
+# move_speed moved to HeroBase (Run 157; @export, base default 220 = Shino).
+# Bea assigns her 230 at the top of _ready, same pattern as max_hp = 80.
 # max_hp moved to HeroBase (Batch 5; @export). Bea sets max_hp = 80 early in
 # _ready (base default is Shino's 100).
 # current_hp, current_chi moved to HeroBase (Batch 3); current_hp reset to
 # max_hp at _ready top.
 # MAX_CHI moved to HeroBase (Batch 5).
 
-const CHI_PER_DAMAGE_DEALT: float = 0.5
-const CHI_PER_DAMAGE_TAKEN: float = 1.5
+# Run 168 — BASE CHI GAIN SLOWED ~40% (Bruno: "chi meter fills too fast, ult is
+# way too spammy and easy to win with"). Was 0.5 / 1.5. Kept byte-for-byte in
+# step with Shino.gd — these two constants are a matched pair by design
+# (GDD 8.3.2: "universal Chi, both characters share gain rules"), so any future
+# retune MUST touch both files or the ninjas silently drift apart.
+#
+# The ult costs 100 Chi, so the old rates meant a full ult every ~200 damage
+# dealt — two or three combos in a normal room. At 0.30 that becomes ~333, so an
+# ult lands roughly once per fight and reads as a decision instead of a rotation
+# button. The dealt:taken ratio stays ~1:3.33 so the "reward aggression" arm
+# isn't quietly gutted along with the nerf.
+#
+# Awards route through HeroBase._chi_award_whole(), which BANKS the fraction.
+# Every call site below used to int()-truncate first, so at 0.30/dmg a 3-damage
+# hit would have awarded int(0.9) = ZERO. See _add_chi_f().
+const CHI_PER_DAMAGE_DEALT: float = 0.30
+const CHI_PER_DAMAGE_TAKEN: float = 1.00
 
 # --- AI behavior tuning ---
 const AI_FOLLOW_DIST_TARGET: float = 72.0    # Preferred spacing from Shino
@@ -394,12 +409,22 @@ var _pirouette_phase: float = 0.0   # advances during DASHING for body spin
 
 # --- Ult state ---
 var _ult_timer: float = 0.0
+# Run 168 — FALSE for the whole splash window, TRUE from the frame the blades
+# actually come out. _tick_ult() keys off this rather than off
+# RunState.ult_splash_active, because the splash flag is cleared ~0.16s BEFORE
+# play() returns (the panels still have to slide off screen). Keying on the flag
+# meant _tick_ult ran during that gap with _ult_timer still at 0.0, instantly
+# tripping the "timer expired" branch: _ult_in_dizzy latched true before the
+# attack had begun, which then skipped Bea's ENTIRE blink-teleport sequence and
+# her dizzy flourish on every single solo ult. This flag closes that window.
+var _ult_attack_started: bool = false
 var _ult_in_dizzy: bool = false
 var _ult_freeze_targets: Array = []
 var _was_ult_frozen: bool = false      # Run 151 — tracks partner ult freeze for post-freeze cleanup
 var _ult_blink_positions: Array = []   # remembered positions for body marker
 var _ult_blink_timer: float = 0.0
 var _ult_blink_idx: int = 0
+var _ult_home_pos: Vector2 = Vector2.ZERO   # where Bea started her ult — she returns here when it ends
 
 # --- Signal-forwarded references for boon book-keeping etc ---
 signal ult_fired()
@@ -476,7 +501,9 @@ func _bump_combo() -> void:
 func _ready() -> void:
 	hero_id = "bea"   # HeroBase identity — per-hero RunState gating key
 	max_hp = 80       # Batch 5 — max_hp is now a HeroBase @export (base default 100 = Shino)
+	move_speed = 230.0   # Run 157 — move_speed is now a HeroBase @export (base default 220 = Shino)
 	current_hp = max_hp
+	_clean_move_speed = move_speed   # Run 155 — snapshot clean base before any trap can zero it (rez restore)
 	player_controlled = false   # Batch 4 — Bea spawns as the AI partner (base default is true)
 	# Batch 3 — Bea's external-heal particle FX (base default is Shino's).
 	_heal_fx_color = Color(0.90, 0.60, 0.20, 1.0)
@@ -684,12 +711,66 @@ func _physics_process(delta: float) -> void:
 	# Run 150 (Bruno fix 11) — GLOBAL ULT FREEZE: while Shino's ultimate
 	# cinematic runs, Bea (player-controlled OR AI) is fully frozen. The only
 	# input read is the ult button → queues the future double-ult.
-	if RunState.ult_freeze_caster == "shino" and state != State.DOWNED:
+	# Run 158 — drop a stale freeze before we honour it (see RunState.validate_ult_freeze).
+	# Without this, a leaked "shino" freeze pinned Bea in place permanently.
+	RunState.validate_ult_freeze()
+	# ------------------------------------------------------------------
+	# Run 168 — BUG FIX: this test was `== "shino"`, which does NOT match "duo".
+	# ------------------------------------------------------------------
+	# DuoUlt.gd's own header claims the "duo" sentinel "matches NEITHER hero id →
+	# both freeze-blocks early-return". That was only ever true for Shino, whose
+	# test is `!= _my_ult_id` and so catches any non-self value. Bea's compared
+	# against the literal "shino", so the instant ult_freeze_caster flipped to
+	# "duo" she FELL THROUGH the freeze-block and ran her entire normal physics
+	# process — reading input, moving, attacking — while DuoUlt was simultaneously
+	# tweening her global_position across the arena to the corner marks. Two
+	# writers, one transform. That is a direct cause of the "Bea is frozen /
+	# behaves wrongly during the ult" half of Bruno's report, and it also meant
+	# she was still swinging during a cinematic that is supposed to stop the world.
+	#
+	# Written as "not me, and not nobody" so it catches "shino", "duo", and any
+	# future sentinel without needing another edit here.
+	if RunState.ult_freeze_caster != "" and RunState.ult_freeze_caster != "bea" \
+	and state != State.DOWNED:
 		velocity = Vector2.ZERO
 		_was_ult_frozen = true
-		if player_controlled and _act_jp("ult"):
+		# Run 168 — duo conversion is allowed ONLY inside the splash window, and
+		# only before lock-in. See the matching block in Shino.gd for why the old
+		# un-gated version (hijack an ult already mid-animation) had to go.
+		if player_controlled and _act_jp("ult") \
+		and RunState.ult_splash_active and not RunState.ult_locked_in \
+		and not RunState.duo_ult_active \
+		and current_chi >= max(1, int(round(float(ULT_CHI_COST) * RunState.tide_master_ult_cost_mult("bea")))):
 			RunState.double_ult_queued = true
 			FX.spawn_hit_particles(global_position, Color(0.9, 0.6, 1.0, 0.9), 6)
+			DuoUlt.request()
+		return
+	# ------------------------------------------------------------------
+	# Run 168 — THE CASTER STANDS STILL DURING THEIR OWN SPLASH.
+	# ------------------------------------------------------------------
+	# The freeze-block above only pins the PARTNER (it tests "caster != me"), so
+	# without this the ninja who pressed ult would keep taking input, walking and
+	# swinging for the whole ~2s splash while their own portrait filled half the
+	# screen. Bruno's requirement is "during ult, ALL action is frozen for the
+	# animation" — that has to include the person who started it.
+	#
+	# Returning here also parks _tick_timers(), so i-frame / charge / combo
+	# windows do not silently burn down behind the splash frame.
+	#
+	# THE ONE INPUT STILL READ IS ULT — the 1-PLAYER duo path. With a single pad,
+	# the SAME player presses ult again during the splash to pull their AI
+	# partner into the combined ult. This has to be handled HERE rather than
+	# further down the function: everything below this block is unreachable while
+	# the splash is up, so a 1P duo check placed after it can never fire. (It was
+	# briefly written that way and was silently dead code — the 2P path worked
+	# because the partner is caught by the freeze-block ABOVE this one.)
+	if RunState.ult_splash_active:
+		velocity = Vector2.ZERO
+		if not RunState.two_player and player_controlled \
+		and state == State.BEA_ULT_CASTING \
+		and not RunState.ult_locked_in and not RunState.duo_ult_active \
+		and RunState.ult_freeze_caster == "bea" and _act_jp("ult"):
+			DuoUlt.request()
 		return
 	# Run 151 — Post-freeze cleanup: if Bea was frozen (ult freeze OR tree
 	# pause from boon offers/menus), cancel any charge whose button release
@@ -704,6 +785,11 @@ func _physics_process(delta: float) -> void:
 		_y_hold_dur = -1.0
 		_x_hold_dur = -1.0
 		_a_hold_dur = -1.0
+	# Duo-ult (1P caster path): the controlling player presses ult AGAIN during
+	# Bea's OWN ult. If Shino has full Chi, DuoUlt.request() launches the combined
+	# ult. (In 2P the second press comes from the partner player's freeze-block.)
+	# (Run 168 — the 1P self-duo check moved UP into the splash block above; it is
+	# unreachable from here, because the splash block returns before this line.)
 	if _drupe_invuln_timer > 0.0:
 		_drupe_invuln_timer -= delta   # Run 128 — Drupe Guard window
 	# Run 130 — Ghost Pepper: 1.5s without attacking → vanish.
@@ -823,6 +909,28 @@ func _physics_process(delta: float) -> void:
 	# Bea can still escape via dash. AI-controlled Bea waits it out.
 	# Bash/Frozen freeze
 	if status and status.is_movement_locked():
+		# ------------------------------------------------------------------
+		# Run 168 — DEADLOCK BREAKER. The ult timeline MUST keep advancing.
+		# ------------------------------------------------------------------
+		# This branch skips the `match state` below, so a Bash/Frozen/Rooted
+		# status landing on Bea mid-ult meant _tick_ult() never ran: _ult_timer
+		# never decremented and _bea_release_ult_freeze() was never reached.
+		# And it could not resolve itself either — StatusComponent._process()
+		# now early-returns for heroes while a cinematic is active, so the
+		# status's own `remaining` was frozen too. The two blocked each other
+		# permanently: both heroes pinned, the whole world process-disabled,
+		# no door reachable to trigger the scene-change hook. A hard brick.
+		#
+		# Neither watchdog could rescue it — is_ult_casting() stays true, so
+		# validate_ult_freeze() reads the freeze as legitimate and UltFreeze
+		# keeps the world stopped on exactly the same reasoning.
+		#
+		# The ult is a full-body committed action that already grants total
+		# invulnerability, so a CC landing during it should never have been able
+		# to interrupt it in the first place. Run it and return.
+		if state == State.BEA_ULT_CASTING:
+			_tick_ult(delta)
+			return
 		if player_controlled and _act_jp("dash") and dash_charges > 0:
 			_y_hold_dur = -1.0
 			_x_hold_dur = -1.0
@@ -925,6 +1033,9 @@ func _tick_timers(delta: float) -> void:
 		_titans_roar_window -= delta
 	if _bullseye_finale_window > 0.0:
 		_bullseye_finale_window -= delta
+	# Run 156 — Sweet Harvest heal ICD (mirrors Player._sweet_harvest_heal_icd).
+	if _bea_sweet_harvest_heal_icd > 0.0:
+		_bea_sweet_harvest_heal_icd -= delta
 
 	if _swap_tap_timer > 0.0:
 		_swap_tap_timer -= delta
@@ -1040,7 +1151,7 @@ func _execute_swap_2p() -> void:
 	_refresh_swap_label()
 	if _shino != null and is_instance_valid(_shino) and _shino.has_method("_refresh_name_label"):
 		_shino._refresh_name_label()
-	print("[Bea] 2P swap — Shino dev=%d, Bea dev=%d" % [RunState.shino_device, RunState.bea_device])
+	Log.dbg("[Bea] 2P swap — Shino dev=%d, Bea dev=%d" % [RunState.shino_device, RunState.bea_device])
 
 
 func _show_tag_in_icon(visible: bool) -> void:
@@ -1075,7 +1186,7 @@ func _execute_swap() -> void:
 			# tier-5 AI drops its target and beelines to the body (Priority 0 in its AI
 			# tick) and force-channels the rez even with enemies nearby.
 			RunState.revive_recall_active = true
-			print("[Bea] Swap→RECALL — tier-5 AI summoned to revive the downed ninja.")
+			Log.dbg("[Bea] Swap→RECALL — tier-5 AI summoned to revive the downed ninja.")
 			return
 
 	# Run 13 — guard: if the partner being swapped TO is DOWNED, refuse the swap
@@ -1086,7 +1197,7 @@ func _execute_swap() -> void:
 		if player_controlled and _shino.is_downed():
 			partner_downed = true
 	if partner_downed:
-		print("[Bea] Swap refused — partner is downed.")
+		Log.dbg("[Bea] Swap refused — partner is downed.")
 		return
 
 	# Save current downed status so we don't yank a downed Bea out of DOWNED.
@@ -1131,16 +1242,25 @@ func _execute_swap() -> void:
 		_vortex_release_enemies()
 	_free_dive_reticle()    # Run 49 — don't leak the landing circle if swap fires mid-aim
 	_set_barrier_phasing(false)   # Run 110 — don't leak airborne barrier-phasing if swap fires mid-leap
-	# Defensive: if the swap fires mid-ult, un-freeze any pending freeze targets
-	# so enemies don't become permanent statues. (Edge case — flagged for review.)
-	for e in _ult_freeze_targets:
-		if is_instance_valid(e):
-			e.process_mode = Node.PROCESS_MODE_INHERIT
+	# Run 168 — this used to write e.process_mode = INHERIT over _ult_freeze_targets
+	# "so enemies don't become permanent statues". Under the new architecture that
+	# is actively harmful: UltFreeze is the sole owner of process_mode, and this
+	# list is bookkeeping only. Worse, un-freezing here was NOT self-healing —
+	# UltFreeze._sweep() skips any node it has already recorded in _restore, so
+	# the enemies this woke up stayed awake and attacking for the rest of the
+	# cinematic while BOTH heroes were still pinned by the freeze. Hot-swapping
+	# mid-ult reproduced the exact "enemies keep hitting her while she's frozen"
+	# bug this run set out to kill.
+	#
+	# Enemies can no longer become permanent statues anyway: UltFreeze restores
+	# every node it froze on end(), and its watchdog force-releases the world if
+	# the freeze outlives the ult.
 	_ult_freeze_targets.clear()
 	_ult_blink_positions.clear()
+	_ult_attack_started = false
 
 	_refresh_swap_label()
-	print("[Bea] Hot-swap executed — Bea player_controlled = %s" % str(player_controlled))
+	Log.dbg("[Bea] Hot-swap executed — Bea player_controlled = %s" % str(player_controlled))
 
 
 func _clear_flash() -> void:
@@ -1424,9 +1544,16 @@ func _tap_katana() -> void:
 		_bea_apply_family_statuses_on_hit(e, true, false, false, false, false)
 		# Run 134 — killer attribution for the universal on-death hook (fix 5).
 		e.set_meta("last_damager", "bea")
-		e.take_damage(scaled, to_e.normalized() if to_e.length() > 0.01 else facing)
+		FX.hit_rumble("bea")
+		var _kb_e: Vector2 = to_e.normalized() if to_e.length() > 0.01 else facing
+		e.take_damage(scaled, _kb_e)
+		# Run 157 — Cluster Mastery parity. Its only consumer lived on Shino and
+		# read a GLOBAL flag, so Bea picking it paid out on HIS hits, never hers.
+		if RunState.get_cluster_mastery_double_chance(combo_count, "bea") > randf():
+			e.take_damage(scaled, _kb_e)
+			FX.spawn_hit_particles(e.global_position, Color(0.75, 0.45, 1.0, 0.8), 4)
 		hit_count += 1
-		_add_chi(int(CHI_PER_DAMAGE_DEALT * float(base_dmg)))
+		_add_chi_f(CHI_PER_DAMAGE_DEALT * float(base_dmg))
 		_try_evergreen_step_heal()
 		FX.spawn_hit_particles(e.global_position, Color(0.20, 0.92, 0.82, 1.0), 6)
 		# Run 115 — push enemy forward with Bea so they stay in blade range.
@@ -1439,7 +1566,9 @@ func _tap_katana() -> void:
 				_enemy_pinned_this_swing = true
 
 	# Sound + shake feedback
-	FX.play_sound("bea_katana_%d" % clampi(katana_step + 1, 1, 4))
+	FX.play_sound("bea_katana_%d" % clampi(katana_step + 1, 1, 4))   # swing = Classic Swish 1
+	if hit_count > 0:
+		FX.play_sound("bea_katana_hit")   # combat-SFX: Organic Slash on katana connect
 	if is_finisher and hit_count > 0:
 		_spawn_bea_finisher_impact(global_position, true)
 		FX.play_sound("bea_katana_finisher")
@@ -1460,7 +1589,10 @@ func _tap_katana() -> void:
 			_bea_spawn_stomp_earth_line(global_position, RunState.get_stomp_combo_line_length(combo_count), false)
 		# Run 129 — Master Stroke force-crit moved into _bea_scale_damage
 		# (pre-roll); the old post-hit set here primed the WRONG hit.
-		var bb_heal: int = RunState.get_bunch_bloom_finisher_heal(_shino.combo_count if is_instance_valid(_shino) else 0)
+		# Run 156 — was reading _shino.combo_count (copy-paste from Player.gd): Bea's
+		# Bunch Bloom heal must scale off HER combo meter, and read 0 in solo/dojo
+		# contexts where Shino isn't a valid node.
+		var bb_heal: int = RunState.get_bunch_bloom_finisher_heal(combo_count)
 		if bb_heal > 0:
 			var bea_max: int = get_effective_max_hp()
 			current_hp = min(bea_max, current_hp + bb_heal)
@@ -1477,7 +1609,7 @@ func _tap_katana() -> void:
 						sc.apply("poison", 5.0, sg_poison)
 					if og_burst > 0 and sc.has("poison"):
 						sc.apply("poison", 5.0, og_burst)
-					if RunState.should_cluster_splash_trigger(true, _shino.combo_count if is_instance_valid(_shino) else 0):
+					if RunState.should_cluster_splash_trigger(true, combo_count):   # Run 156 — own combo meter
 						_bea_apply_cluster_splash(e.global_position)
 
 	# Lockout window for this swing
@@ -1758,6 +1890,10 @@ func _start_dash() -> void:
 			if _pl2.has_method("_spawn_hydro_slide_puddle"):
 				_pl2._spawn_hydro_slide_puddle(global_position)
 				break
+	# Run 156 — Bull Rush parity (was Shino-only, and the only B-slot boon with
+	# no Bea path). Contact damage to enemies Bea dashes into.
+	if RunState.bea_has("bull_rush"):
+		_bea_apply_bull_rush_damage()
 	# Run 130 — Slapstick: giant banana / bolt at Bea's dash point (routed
 	# through Shino's shared spawner).
 	if RunState.bea_has("slapstick"):
@@ -1928,13 +2064,14 @@ func _emerge() -> void:
 		var kb_dir: Vector2 = (e.global_position - global_position).normalized()
 		if e.has_method("take_damage"):
 			e.set_meta("last_damager", "bea")   # kill attribution
+			FX.hit_rumble("bea")
 			e.take_damage(base_dmg, kb_dir)
 		var ts: Variant = e.get("status") if e.has_method("get") else null
 		if ts != null and ts.has_method("apply"):
 			ts.apply("cracked_soil", 4.0, 1)
 			ts.apply("stagger", 0.5, 1)
 			if ts.get_stacks("cracked_soil") >= 3:
-				if RunState.shino_has("petrify") or RunState.bea_has("petrify"):
+				if RunState.bea_has("petrify"):   # Run 156 — picker-only (was a team check)
 					ts.apply("bash", 3.0, 1)
 					ts.apply("vulnerable", 3.0, 2)
 				else:
@@ -1980,6 +2117,7 @@ func _maybe_fire_vine_lash() -> void:
 		lashes += 1
 		var dmg: int = _bea_scale_damage(RunState.VINE_LASH_DAMAGE, false, false, e2, "ranged")
 		e2.set_meta("last_damager", "bea")
+		FX.hit_rumble("bea")
 		e2.take_damage(dmg, ((e2 as Node2D).global_position - global_position).normalized() * 0.25)
 		_spawn_vine_visual(global_position, (e2 as Node2D).global_position, vine_col)
 		FX.spawn_hit_particles((e2 as Node2D).global_position, vine_col, 5)
@@ -2055,7 +2193,7 @@ func _spawn_rampart_wall_routed() -> void:
 # Chi gained from taking damage — Bea routes through _add_chi (Run 139: Cold
 # Waters halving + Poison Apple conversion + get_effective_max_chi cap, emits chi).
 func _gain_chi_from_damage_taken(adjusted: int) -> void:
-	_add_chi(int(CHI_PER_DAMAGE_TAKEN * adjusted))
+	_add_chi_f(CHI_PER_DAMAGE_TAKEN * float(adjusted))
 
 # Combat teardown when Bea is downed (holsters weapons, drops dive reticle,
 # restores barrier collision if downed mid-leap).
@@ -2347,6 +2485,28 @@ func _bea_apply_family_statuses_on_hit(target: Node, is_primary: bool, is_heavy:
 					if _pl.has_method("_spawn_status_zone"):
 						_pl._spawn_status_zone(target.global_position, 40.0, 4.0, "slippery", 1, Color(0.95, 0.85, 0.30, 0.55))
 						break
+	# Run 156 — Ultimate-boon per-hit payloads (Bea parity with Shino's
+	# _apply_family_statuses_on_hit is_ult block, Combat_Boons §8 family Ults).
+	# This block never existed on Bea, so Inferno Blossom / Tidal Surge /
+	# Terrashock / Storm Finale / Miasma Burst and Bulwark Strike's on-hit stun
+	# did nothing when SHE ulted. Gated on the ulting hero only (Run 131 rule).
+	if is_ult:
+		var uts: Variant = target.get("status") if target.has_method("get") else null
+		if uts != null and uts.has_method("apply"):
+			if RunState.bea_has("bulwark_strike"):
+				uts.apply("bash", 3.0, 1)
+			if RunState.bea_has("inferno_blossom"):
+				uts.apply("burning", 3.0, 3)
+			if RunState.bea_has("tidal_surge"):
+				uts.apply("chilled" if RunState.melon_gelato_mode else "wet", 4.0, 5)
+			if RunState.bea_has("terrashock"):
+				uts.apply("cracked_soil", 4.0, 3)
+				uts.apply("stagger", 0.5, 1)
+			if RunState.bea_has("storm_finale"):
+				uts.apply("bolted" if RunState.greased_lightning_mode else "greased", 5.0, 1)
+			if RunState.bea_has("miasma_burst"):
+				uts.apply("poison", 4.0, 5)
+
 	var ts: Variant = target.get("status") if target.has_method("get") else null
 	if ts == null or not ts.has_method("apply"):
 		return
@@ -2410,10 +2570,13 @@ func _bea_apply_family_statuses_on_hit(target: Node, is_primary: bool, is_heavy:
 						var _ss_ts: Variant = _ss_e.get("status") if _ss_e.has_method("get") else null
 						if _ss_ts != null and _ss_ts.has_method("apply"):
 							_ss_ts.apply(wet_id, wet_dur, 1)
-				for _pl3 in get_tree().get_nodes_in_group("player"):
-					if _pl3.has_method("_spawn_status_zone"):
-						_pl3._spawn_status_zone(_ss_pos, 56.0, 3.0, "chilled", 1, Color(0.45, 0.80, 0.95, 0.45))
-						break
+				# Run 162 — puddle moved to the Lingering Tide passive (mirror of
+				# Shino). Seed Spit itself is splash + knockback only.
+				if RunState.bea_has("lingering_tide"):
+					for _pl3 in get_tree().get_nodes_in_group("player"):
+						if _pl3.has_method("_spawn_status_zone"):
+							_pl3._spawn_status_zone(_ss_pos, 56.0, 3.0, "chilled", 1, Color(0.45, 0.80, 0.95, 0.45))
+							break
 			# Run 27f — Cold Waters corrupt: apply BOTH Soaked AND Chilled.
 			if RunState.bea_has("corrupt_watermelon"):
 				ts.apply("chilled" if wet_id == "wet" else "wet", wet_dur, wet_stacks)
@@ -2530,7 +2693,7 @@ func _bea_apply_family_statuses_on_hit(target: Node, is_primary: bool, is_heavy:
 		ts.apply("cracked_soil", 4.0, 1)
 		if ts.get_stacks("cracked_soil") >= 3:
 			# Run 27f — Petrify (Potato Legendary): Earthbind → 3s Stun + Vulnerable.
-			if RunState.shino_has("petrify") or RunState.bea_has("petrify"):
+			if RunState.bea_has("petrify"):   # Run 156 — picker-only (was a team check)
 				ts.apply("bash", 3.0, 1)
 				ts.apply("vulnerable", 3.0, 2)
 			else:
@@ -2591,7 +2754,8 @@ func _bea_banana_lightning_chain(primary_target: Node, dur: float) -> void:
 		# Run 27d — Tide Storm duo: lightning applies 1 Soaked on hit.
 		if RunState.is_duo_active("banana_watermelon"):
 			ts2.apply("wet", 4.0, 1)
-		var tick: int = max(1, int(round(float(RunState.HULK_SMASH_BASE_DAMAGE) * BANANA_CHAIN_DMG_PCT_BEA)))
+		# Run 156 — Tailwind's GL arm ("lightning dmg instead of dodge").
+		var tick: int = max(1, int(round(float(RunState.HULK_SMASH_BASE_DAMAGE) * BANANA_CHAIN_DMG_PCT_BEA * RunState.get_tailwind_lightning_mult("bea"))))
 		if b.has_method("take_damage"):
 			b.take_damage(tick, Vector2.ZERO)
 		_bea_spawn_chain_arc(origin, b.global_position)
@@ -2838,6 +3002,10 @@ func _tick_charge(delta: float) -> void:
 			_cancel_bea_charge()
 			return
 		if input_name != "" and _act_jr(input_name):
+			# Phase 6a haptics — release thump, mirroring Shino._release_charge().
+			# Covers the shuriken blast, katana whirl and meteor dive alike, since
+			# every Bea charge release passes through this branch.
+			FX.charge_rumble("bea", false)
 			match _charging_button:
 				"y": _start_katana_whirl()    # Katana Whirl / Vortex Spin
 				"x":
@@ -2846,6 +3014,10 @@ func _tick_charge(delta: float) -> void:
 					# placement as Shino's X-charge dispatch.
 					if RunState.bea_has("quake_charge"):
 						_bea_apply_quake_charge()
+					# Run 156 — Coco-Slam parity (was Shino-only). Same X-charge
+					# dispatch slot as Shino's _apply_coco_slam.
+					if RunState.bea_has("coco_slam"):
+						_bea_apply_coco_slam()
 				"a": _start_shuriken_flurry()
 			# Run 60 — universal family charge-release dispatches (mirror Player.gd:1622-1633).
 			_bea_apply_family_charge_releases()
@@ -2879,7 +3051,7 @@ func _spawn_dive_reticle() -> void:
 	_dive_reticle.width = 3.0
 	_dive_reticle.default_color = Color(1.0, 0.62, 0.18, 0.85)
 	_dive_reticle.closed = true
-	var radius: float = METEOR_DIVE_AOE_RADIUS * RunState.get_big_broccoli_aoe_mult()
+	var radius: float = METEOR_DIVE_AOE_RADIUS * RunState.get_big_broccoli_aoe_mult("bea")
 	var n: int = 24
 	for i in range(n):
 		var ang: float = TAU * float(i) / float(n)
@@ -3088,7 +3260,7 @@ func _finish_meteor_dive() -> void:
 		_bea_sprite.scale = Vector2.ONE * BEA_SPRITE_SCALE   # back to base — NOT 1.0
 
 	# Crash AoE — Big Broccoli scales the radius.
-	var dive_radius: float = METEOR_DIVE_AOE_RADIUS * RunState.get_big_broccoli_aoe_mult()
+	var dive_radius: float = METEOR_DIVE_AOE_RADIUS * RunState.get_big_broccoli_aoe_mult("bea")
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if not is_instance_valid(e) or not e.has_method("take_damage"):
 			continue
@@ -3104,8 +3276,10 @@ func _finish_meteor_dive() -> void:
 		_try_apply_shell_breaker(e)
 		_bea_apply_family_statuses_on_hit(e, false, true, false, true, false)
 		e.set_meta("last_damager", "bea")   # Run 134 — killer attribution (fix 5)
+		FX.hit_rumble("bea")
 		e.take_damage(dmg, dir)
-		_add_chi(int(CHI_PER_DAMAGE_DEALT * float(METEOR_DIVE_DAMAGE)))
+		_add_chi_f(CHI_PER_DAMAGE_DEALT * float(METEOR_DIVE_DAMAGE))
+		_try_bea_sweet_harvest_heal()   # Run 156 — Sweet Harvest heal arm parity
 		_try_bea_fall_harvest_heal(e)
 		_try_evergreen_step_heal()
 		FX.spawn_hit_particles(e.global_position, Color(1.0, 0.70, 0.25, 1.0), 10)
@@ -3272,8 +3446,9 @@ func _hit_naginata_line(line_range: float, line_width: float, base_dmg: int, big
 		var _kb_mag: float = 2.0 if big_knockback else 1.0
 		# Run 134 — killer attribution for the universal on-death hook (fix 5).
 		e.set_meta("last_damager", "bea")
+		FX.hit_rumble("bea")
 		e.take_damage(scaled, kb_dir)
-		_add_chi(int(CHI_PER_DAMAGE_DEALT * float(base_dmg)))
+		_add_chi_f(CHI_PER_DAMAGE_DEALT * float(base_dmg))
 		# Naginata thrust = blue-white spark feel; overhead = brighter flash
 		var col: Color = Color(0.85, 0.95, 1.0, 1.0) if not big_knockback else Color(1.0, 0.95, 0.6, 1.0)
 		FX.spawn_hit_particles(e.global_position, col, 7 if not big_knockback else 12)
@@ -3306,8 +3481,9 @@ func _hit_naginata_circle(center: Vector2, radius: float, base_dmg: int, is_fini
 		var kb_dir: Vector2 = to_e.normalized() if to_e.length() > 0.01 else facing
 		# Run 134 — killer attribution for the universal on-death hook (fix 5).
 		e.set_meta("last_damager", "bea")
+		FX.hit_rumble("bea")
 		e.take_damage(scaled, kb_dir)
-		_add_chi(int(CHI_PER_DAMAGE_DEALT * float(base_dmg)))
+		_add_chi_f(CHI_PER_DAMAGE_DEALT * float(base_dmg))
 		FX.spawn_hit_particles(e.global_position, Color(1.0, 0.85, 0.55, 1.0), 12)
 		hit += 1
 	return hit
@@ -3422,8 +3598,9 @@ func _hit_naginata_arc(arc_range: float, arc_deg: float, base_dmg: int, is_finis
 		_bea_apply_family_statuses_on_hit(e, false, true, false, false, false)
 		# Run 134 — killer attribution for the universal on-death hook (fix 5).
 		e.set_meta("last_damager", "bea")
+		FX.hit_rumble("bea")
 		e.take_damage(scaled, to_e.normalized() if to_e.length() > 0.01 else facing)
-		_add_chi(int(CHI_PER_DAMAGE_DEALT * float(base_dmg)))
+		_add_chi_f(CHI_PER_DAMAGE_DEALT * float(base_dmg))
 		FX.spawn_hit_particles(e.global_position, Color(0.85, 0.95, 1.0, 1.0), 7)
 		# Run 28 — Firebrand + Splash Smash on heavy (X) hits.
 		var ts_n: Variant = e.get("status") if e.has_method("get") else null
@@ -3501,7 +3678,7 @@ func _tick_whirl(delta: float) -> void:
 		FX.spawn_hit_particles(trail_pos, Color(0.30, 0.88, 0.78, 0.45), 2)
 
 	# --- Vortex: pull enemies inward + capture new ones ---
-	var pull_r: float = VORTEX_PULL_RADIUS * RunState.get_big_broccoli_aoe_mult()
+	var pull_r: float = VORTEX_PULL_RADIUS * RunState.get_big_broccoli_aoe_mult("bea")
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if not is_instance_valid(e) or not e.has_method("take_damage"):
 			continue
@@ -3585,8 +3762,10 @@ func _fire_vortex_damage_tick() -> void:
 		# Zero-vector knockback so stun isn't broken by recoil movement.
 		# Run 134 — killer attribution for the universal on-death hook (fix 5).
 		e.set_meta("last_damager", "bea")
+		FX.hit_rumble("bea")
 		e.take_damage(scaled, Vector2.ZERO)
-		_add_chi(int(CHI_PER_DAMAGE_DEALT * float(WHIRL_DAMAGE)))
+		_add_chi_f(CHI_PER_DAMAGE_DEALT * float(WHIRL_DAMAGE))
+		_try_bea_sweet_harvest_heal()   # Run 156 — Sweet Harvest heal arm parity
 		_try_bea_fall_harvest_heal(e)
 		FX.spawn_hit_particles(e.global_position, Color(0.20, 0.90, 0.80, 1.0), 6)
 	# Tornado pulse feedback.
@@ -3792,6 +3971,9 @@ func _finish_katana_whirl() -> void:
 	FX.spawn_burst_particles(global_position, Color(0.20, 0.90, 0.80, 1.0), 16)
 	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_SHORT)
 	FX.play_sound("bea_whirl_end")
+	# Run 156 — Bunch Burst parity (was Shino-only). Shino fires his on the punch
+	# flurry final; the whirl end is Bea's matching charge-finish beat.
+	_bea_apply_bunch_burst(global_position, VORTEX_PULL_RADIUS, WHIRL_DAMAGE)
 	state = State.PLAYER_CONTROLLED if player_controlled else State.AI_FOLLOW
 
 
@@ -3901,6 +4083,11 @@ func _throw_shuriken(dir: Vector2) -> void:
 # Thousand Cut Dance (Ult — §8.2.3)
 # ============================================================
 
+# Run 158 — HeroBase override: ground truth for RunState.validate_ult_freeze().
+func is_ult_casting() -> bool:
+	return state == State.BEA_ULT_CASTING
+
+
 func _start_ult() -> void:
 	# Tide Master: pay reduced cost; refund 25% of base cost.
 	var ult_pay: int = max(1, int(round(float(ULT_CHI_COST) * RunState.tide_master_ult_cost_mult("bea"))))
@@ -3910,23 +4097,78 @@ func _start_ult() -> void:
 		current_chi = min(get_effective_max_chi(), current_chi + tm_refund)
 	# Run 136 — Shell Wall retired: redundant with Bulwark Strike (Ult slot).
 	emit_signal("bea_chi_changed", current_chi, MAX_CHI)
-	# Run 132 — apply Bea's ult-boon cast payloads (parity with Player.gd). Bea's ult
-	# previously skipped these entirely; now her own harvest_moon / bulwark_strike /
-	# titans_roar / bullseye_finale / bunch_bloom_ult fire when SHE casts.
-	_bea_apply_ult_boon_cast_effects()
 	state = State.BEA_ULT_CASTING
 	# Run 150 (Bruno fix 11) — freeze Shino (player or AI) for the cinematic.
 	RunState.ult_freeze_caster = "bea"
 	RunState.double_ult_queued = false
-	_ult_timer = ULT_CINEMATIC_DURATION
+	# Run 168 — _ult_timer stays at ZERO until the attack actually starts. It used
+	# to be armed here, which would now mean the blink-teleport timeline running
+	# underneath the splash frame — Bea would flicker around the arena while her
+	# own splash was still on screen asking whether to combine.
+	_ult_timer = 0.0
 	_ult_in_dizzy = false
 	_ult_freeze_targets.clear()
 	_ult_blink_positions.clear()
 	_ult_blink_idx = 0
 	_ult_blink_timer = 0.0
+	_ult_home_pos = global_position   # remember start so she lands back here when the ult ends
+	_ult_attack_started = false
+	# Run 168 — emitted at PRESS time, matching Shino. It used to fire only from
+	# the solo attack body, so a duo ult never emitted it at all and any HUD or
+	# stats listener under-counted Bea's ultimates.
+	emit_signal("ult_fired")
+	# Run 168 — deliberately NOT setting is_invulnerable here. It used to be set
+	# at press time while its matching iframe_timer was only set further down, so
+	# on the duo path and on every bail path Bea got is_invulnerable = true with
+	# iframe_timer = 0. _tick_timers() only ever clears the flag when the timer
+	# DECAYS through zero, so a zero timer meant it never cleared: Bea walked out
+	# of the duo ult permanently immune to all damage for the rest of the run.
+	# Cinematic-wide safety is handled by HeroBase.take_damage()'s hard gate on
+	# RunState.ult_cinematic_active(); the real i-frame window is armed together
+	# with its timer in _run_bea_ult_attack().
+	velocity = Vector2.ZERO
+
+	# ==================================================================
+	# Run 168 — SPLASH FIRST, ATTACK SECOND. (Mirror of Shino._start_ult.)
+	# ==================================================================
+	# Stop the world before a single splash frame draws, so nothing gets a free
+	# hit during the ~2s the players spend deciding whether to combine. UltFreeze
+	# re-scans every frame, so enemies spawning mid-splash are caught too.
+	UltFreeze.begin()
+	var outcome: String = await UltSplash.play("bea")
+
+	# Bail: the ult ended under us (Bea went down, room changed, hard reset).
+	if state != State.BEA_ULT_CASTING or not is_inside_tree():
+		_ult_attack_started = false
+		_bea_release_ult_freeze()
+		return
+
+	# Partner joined — DuoUlt owns both ninjas and runs its own cinematic. Bea's
+	# solo attack must NOT also fire.
+	if outcome == "duo" or RunState.duo_ult_active:
+		return
+
+	_run_bea_ult_attack()
+
+
+# Run 168 — everything below used to live inline at the tail of _start_ult().
+# Extracted so the splash can sit cleanly between "the player pressed ult" and
+# "the blades come out", and so the duo path can skip it entirely.
+func _run_bea_ult_attack() -> void:
+	# Run 132 — apply Bea's ult-boon cast payloads (parity with Player.gd). Bea's ult
+	# previously skipped these entirely; now her own harvest_moon / bulwark_strike /
+	# titans_roar / bullseye_finale / bunch_bloom_ult fire when SHE casts.
+	# Run 168 — fires HERE, not at press time: on a duo, DuoUlt applies BOTH
+	# heroes' payloads itself, so casting them up front double-applied Bea's.
+	_bea_apply_ult_boon_cast_effects()
+	_ult_timer = ULT_CINEMATIC_DURATION
+	_ult_attack_started = true
+	# I-frames, armed WITH their timer so _tick_timers() can always clear them
+	# again. Mostly redundant now that HeroBase.take_damage() hard-refuses damage
+	# for the whole cinematic, but it covers the handful of frames after the
+	# freeze lifts and before Bea has control back.
 	is_invulnerable = true
 	iframe_timer = ULT_CINEMATIC_DURATION + ULT_DIZZY_DURATION + 0.10
-	velocity = Vector2.ZERO
 
 	# Build the blink chain: every alive on-screen enemy.
 	var targets: Array = []
@@ -3940,20 +4182,22 @@ func _start_ult() -> void:
 	targets.sort_custom(func(a, b): return global_position.distance_to(a.global_position) < global_position.distance_to(b.global_position))
 
 	# Deal damage to each target now; visual blinks happen during the cinematic.
-	var scaled: int = _bea_scale_damage(ULT_PER_ENEMY_DAMAGE)
+	# Run 157 — Titan's Roar arm 1 (+50% Ult damage) applied here.
+	var scaled: int = int(round(float(_bea_scale_damage(ULT_PER_ENEMY_DAMAGE)) * titans_roar_ult_mult()))
 	var last_target_pos: Vector2 = global_position
 	for e in targets:
 		var dir: Vector2 = (e.global_position - global_position).normalized()
 		# Run 17 — Ult applies family statuses at ULT magnitude (5 stacks where applicable).
 		_bea_apply_family_statuses_on_hit(e, false, false, false, false, true)
 		e.set_meta("last_damager", "bea")   # Run 134 — killer attribution (fix 5)
+		FX.hit_rumble("bea")
 		e.take_damage(scaled, dir)
 		_ult_blink_positions.append(e.global_position)
 		last_target_pos = e.global_position
 		FX.spawn_hit_particles(e.global_position, Color(1.0, 0.8, 1.0, 1.0), 8)
 
 	# Final flourish — bonus damage burst at last target (or back at start if no enemies)
-	var flourish_scaled: int = _bea_scale_damage(ULT_FLOURISH_DAMAGE)
+	var flourish_scaled: int = int(round(float(_bea_scale_damage(ULT_FLOURISH_DAMAGE)) * titans_roar_ult_mult()))
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if not is_instance_valid(e) or not e.has_method("take_damage"):
 			continue
@@ -3964,23 +4208,52 @@ func _start_ult() -> void:
 			if dir2.length() < 0.01:
 				dir2 = facing
 			e.set_meta("last_damager", "bea")   # Run 134 — killer attribution (fix 5)
+			FX.hit_rumble("bea")
 			e.take_damage(flourish_scaled, dir2)
 			FX.spawn_burst_particles(e.global_position, Color(1.0, 0.95, 0.6, 1.0), 12)
 
-	# Time-freeze any survivors (e.g., future boss enemy) for the cinematic
+	# Run 168 — survivors are ALREADY frozen: UltFreeze.begin() ran before the
+	# splash and keeps re-sweeping every frame, so this snapshot loop is not only
+	# redundant, it was actively harmful — it made Bea a SECOND owner of
+	# process_mode alongside UltFreeze/Shino/DuoUlt, and whichever finished first
+	# un-froze enemies the others still wanted stopped. _ult_freeze_targets is
+	# now purely a bookkeeping list.
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if is_instance_valid(e) and e.has_method("is_alive") and e.is_alive():
-			e.process_mode = Node.PROCESS_MODE_DISABLED
 			_ult_freeze_targets.append(e)
 
 	# Spawn the screen-wide flash overlay (purple-pink, distinct from Shino's gold)
 	_spawn_ult_flash()
 	FX.screen_shake(FX.SHAKE_ULT, FX.SHAKE_DUR_LONG)
 	FX.play_sound("bea_ult_fire", 1.3)
-	emit_signal("ult_fired")
+
+
+# Run 168 — release Bea's partner-freeze + the world-freeze, mirroring
+# Shino._release_ult_freeze(). Only releases what SHE holds, and only drops the
+# world-freeze when no other ult phase is still running (so the solo→duo
+# hand-off never opens a gap where enemies get a free frame). Safe to call
+# repeatedly and from any bail path.
+func _bea_release_ult_freeze() -> void:
+	if RunState.ult_freeze_caster == "bea":
+		RunState.ult_freeze_caster = ""
+		RunState.double_ult_queued = false
+	if not RunState.ult_cinematic_active():
+		UltFreeze.end()
+		RunState.ult_locked_in = false
 
 
 func _tick_ult(delta: float) -> void:
+	# Duo-ult took over — DuoUlt owns Bea for the rest of the cinematic. Stop
+	# advancing the single-ult timeline (DuoUlt calls duo_ult_finish() at the end).
+	if RunState.duo_ult_active:
+		return
+	# Run 168 — the attack has not begun yet (splash frame is up, or sliding off).
+	# Bea holds her pose: no timeline, no blink-teleports. Without this she would
+	# flicker around the arena underneath her own splash screen, since she sits
+	# in BEA_ULT_CASTING — and so reaches this tick — for the whole window.
+	if not _ult_attack_started:
+		velocity = Vector2.ZERO
+		return
 	_ult_timer -= delta
 	velocity = Vector2.ZERO
 	move_and_slide()
@@ -4007,17 +4280,70 @@ func _tick_ult(delta: float) -> void:
 			FX.spawn_burst_particles(global_position, Color(1.0, 0.95, 0.7, 1.0), 24)
 		else:
 			# Dizzy resolved → restore enemies + return to player control
-			for e in _ult_freeze_targets:
-				if is_instance_valid(e):
-					e.process_mode = Node.PROCESS_MODE_INHERIT
+			# Land back where she started so the ult doesn't leave her displaced
+			# across the arena (parity with Shino's ult ending in place).
+			global_position = _ult_home_pos
+			FX.spawn_burst_particles(global_position, Color(1.0, 0.6, 0.95, 1.0), 10)
+			# Run 168 — UltFreeze owns process_mode; this list is bookkeeping only.
+			_ult_attack_started = false
 			_ult_freeze_targets.clear()
 			_ult_blink_positions.clear()
 			# Run 150 (Bruno fix 11) — release the partner freeze.
-			if RunState.ult_freeze_caster == "bea":
-				RunState.ult_freeze_caster = ""
+			# Run 168 — routed through the helper so the WORLD-freeze is released
+			# on the same line the partner-freeze is. Releasing only the partner
+			# (as this did) would leave every enemy disabled by UltFreeze until
+			# its watchdog noticed, one frame later.
+			_bea_release_ult_freeze()
 			state = State.PLAYER_CONTROLLED if player_controlled else State.AI_FOLLOW   # Run 61b
 			if body_anim and body_anim.has_method("set_anim_state"):
 				body_anim.set_anim_state("idle")
+
+
+# -------------------------------------------------------
+# Duo-ult hooks — called by the DuoUlt autoload (DuoUlt.gd)
+# -------------------------------------------------------
+# Current sprite frame, used as Bea's action-portrait face in the split-frame.
+func duo_ult_face_texture() -> Texture2D:
+	if _bea_sprite and _bea_sprite.sprite_frames:
+		return _bea_sprite.sprite_frames.get_frame_texture(_bea_sprite.animation, _bea_sprite.frame)
+	return null
+
+# Drain Chi (the combined ult consumes both ninjas' meters).
+func duo_ult_spend_chi() -> void:
+	current_chi = 0
+	emit_signal("bea_chi_changed", current_chi, get_effective_max_chi())
+
+# Restore normal control once the Duo-ult cinematic ends.
+# Run 168 — FULL state restoration for Bea after a duo. Clears every field the
+# ult timeline touches, not just the obvious ones: leftovers here are what make
+# a hero "feel wrong" after a duo (stuck charge state, residual knockback, a
+# blink index mid-chain, a stale freeze latch). Enemy un-freezing is NOT done
+# here — UltFreeze owns it and DuoUlt._cleanup() releases it once, after both
+# heroes have been restored.
+func duo_ult_finish() -> void:
+	_ult_attack_started = false
+	# A short, REAL i-frame window on landing (armed with its timer, so
+	# _tick_timers can decay it away). Never leave is_invulnerable set without a
+	# timer — that is the permanent-immunity bug described in _start_ult.
+	is_invulnerable = true
+	iframe_timer = max(iframe_timer, 0.35)
+	_ult_freeze_targets.clear()
+	_ult_blink_positions.clear()
+	_ult_blink_idx = 0
+	_ult_blink_timer = 0.0
+	_ult_timer = 0.0
+	_ult_in_dizzy = false
+	velocity = Vector2.ZERO
+	_hit_knockback_vel = Vector2.ZERO
+	_was_ult_frozen = false
+	_y_hold_dur = -1.0
+	_x_hold_dur = -1.0
+	_a_hold_dur = -1.0
+	if body_anim and body_anim.has_method("set_anim_state"):
+		body_anim.set_anim_state("idle")
+	state = State.PLAYER_CONTROLLED if player_controlled else State.AI_FOLLOW
+	if body_anim and body_anim.has_method("set_anim_state"):
+		body_anim.set_anim_state("idle")
 
 
 func _spawn_ult_flash() -> void:
@@ -4162,27 +4488,27 @@ func _bea_scale_damage(base: int, is_finisher: bool = false, is_primary: bool = 
 	# (melee AND ranged). CHARGED attacks (vortex/meteor) need the longer 3s idle.
 	var _db_thresh: float = RunState.DRAWN_BOW_IDLE_CHARGED if _atype == "charge" else RunState.DRAWN_BOW_IDLE
 	if RunState.bea_has("drawn_bow") and _no_attack_timer >= _db_thresh:
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("bea")
 	_no_attack_timer = 0.0
 	# Run 132 — Bullseye Finale post-ult window: +25% crit chance (mirrors Player.gd).
 	if _bullseye_finale_window > 0.0:
-		RunState.finisher_crit_chance_bonus += 0.25
+		RunState.add_finisher_crit_bonus("bea", 0.25)
 	# Run 27 — Shocking Slip duo (Grape+Banana): Sparked/Bolted target grants
 	# +20% crit chance on this landing hit (seeded pre-roll, consumed by roll).
 	if target != null and target.has_node("StatusComponent"):
 		var _ts_pre = target.get_node("StatusComponent")
 		if _ts_pre.has("sparked") or _ts_pre.has("bolted"):
-			RunState.finisher_crit_chance_bonus += RunState.get_grape_banana_crit_bonus()
+			RunState.add_finisher_crit_bonus("bea", RunState.get_grape_banana_crit_bonus())
 		# Run 27 — Night-Vision Peel duo (Banana+Carrot): Slipped/Greased
 		# targets count as flanked — +20% crit chance on the landing hit.
 		if (_ts_pre.has("slippery") or _ts_pre.has("greased")) and RunState.is_duo_active("banana_carrot"):
-			RunState.finisher_crit_chance_bonus += 0.20
+			RunState.add_finisher_crit_bonus("bea", 0.20)
 	# Run 128 — Topshot (Carrot Legendary): first attack on every NEW enemy
 	# is a guaranteed Mega-Crit (per-enemy meta flag, per hero).
 	if RunState.bea_has("topshot") and target != null and is_instance_valid(target) \
 	and not target.has_meta("topshot_bea"):
 		target.set_meta("topshot_bea", true)
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("bea")
 	# Run 130 — Ghost Pepper: first strike from stealth applies max Burn (5).
 	if _ghost_stealthed:
 		_ghost_stealthed = false
@@ -4191,19 +4517,28 @@ func _bea_scale_damage(base: int, is_finisher: bool = false, is_primary: bool = 
 			target.get_node("StatusComponent").apply("burning", 3.0, 5)
 			FX.spawn_burst_particles((target as Node2D).global_position, Color(1.0, 0.45, 0.10, 0.95), 12)
 	# Run 130 — Marksman's Eye: ranged hits on the Marked target always crit.
-	if _atype == "ranged" and RunState.team_has("marksmans_eye") \
+	if _atype == "ranged" and RunState.bea_has("marksmans_eye") \
 	and target != null and is_instance_valid(target) and target.has_meta("me_marked"):
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("bea")
 	# Run 129 — Golden Carrot (Bea parity — was Shino-only) + Master Stroke
 	# guarantee, moved PRE-roll so the FINISHER itself crits (the old post-hit
 	# sets primed the hit AFTER the finisher — removed).
 	# Run 131 — Golden Carrot is now dash-armed (one finisher per dash). Master
 	# Stroke duo keeps the unconditional every-finisher guarantee.
 	if is_finisher and RunState.master_stroke_active():
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("bea")
 	elif is_finisher and RunState.bea_has("golden_carrot") and _golden_carrot_armed:
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("bea")
 		_golden_carrot_armed = false
+	# Run 156 — Finisher's Aim parity (Carrot Charge slot, was Shino-only):
+	# +50% crit chance on all combo finishers. Must be set BEFORE the crit roll
+	# below, same ordering as Player.gd.
+	if is_finisher and RunState.bea_has("finishers_aim"):
+		RunState.set_finisher_crit_bonus("bea", 0.50)
+	# Run 157 — Heart Shot DD revive window: 100% crit chance while it runs.
+	# Must arm BEFORE the roll below, or it would prime the following hit instead.
+	if dd_crit_active():
+		RunState.arm_force_crit("bea")
 	if RunState.has_method("roll_crit_mult"):
 		mult *= RunState.roll_crit_mult(_atype, "bea")
 	# Run 128 — Smash Zone (Broccoli Legendary): melee-only proximity damage.
@@ -4219,8 +4554,10 @@ func _bea_scale_damage(base: int, is_finisher: bool = false, is_primary: bool = 
 	# Run 130 — Marksman's Eye: +30% crit damage vs the Marked target.
 	if _atype == "ranged" and RunState.last_crit_result and target != null \
 	and is_instance_valid(target) and target.has_meta("me_marked") \
-	and RunState.team_has("marksmans_eye"):
+	and RunState.bea_has("marksmans_eye"):
 		mult *= 1.30
+	# Run 156 — Potato earth-damage arms (Spud Stomp +15% Y / Rock Smash +30% X).
+	mult *= RunState.get_earth_slot_dmg_mult("bea", _atype)
 	# Apple Heavy Harvest — heavy/X attacks gain up to +25% at full HP (per-Bea).
 	var max_hp_bea: int = get_effective_max_hp()
 	var hp_frac_bea: float = float(current_hp) / float(max(1, max_hp_bea))
@@ -4249,8 +4586,8 @@ func _bea_scale_damage(base: int, is_finisher: bool = false, is_primary: bool = 
 		mult *= 1.25
 	# Cluster Cascade — cross-finisher buff.
 	if is_finisher:
-		mult *= RunState.get_cluster_cascade_mult(is_primary)
-		RunState.notify_cluster_cascade_finisher(is_primary)
+		mult *= RunState.get_cluster_cascade_mult(is_primary, "bea")
+		RunState.notify_cluster_cascade_finisher(is_primary, "bea")
 	# Critical Mass: trigger on crit.
 	if RunState.bea_has("critical_mass") and RunState.last_crit_result:
 		_critical_mass_stacks = min(RunState.CRITICAL_MASS_MAX_STACKS, _critical_mass_stacks + 1)
@@ -4292,6 +4629,8 @@ func _bea_scale_damage(base: int, is_finisher: bool = false, is_primary: bool = 
 	# Run 132 — Titan's Roar post-ult window: +20% all damage (mirrors Player.gd).
 	if _titans_roar_window > 0.0:
 		mult *= 1.20
+	# Run 157 — Green Vengeance DD revive window: +50% damage while it runs.
+	mult *= dd_damage_mult()
 	# Run 132 — Killshot (Carrot passive): crits on targets below 25% HP have a 7%
 	# chance to Super-Mega-Crit (~3x extra). Owner-gated to Bea (mirrors Player.gd).
 	if RunState.last_crit_result and RunState.bea_has("killshot") \
@@ -4308,7 +4647,7 @@ func _bea_scale_damage(base: int, is_finisher: bool = false, is_primary: bool = 
 	var _scaled_out: float = float(base) * mult
 	# Run 130 — Marksman's Eye ricochet: ranged hits on the Marked target
 	# bounce to up to 3 nearby enemies at 75% damage.
-	if _atype == "ranged" and RunState.team_has("marksmans_eye") \
+	if _atype == "ranged" and RunState.bea_has("marksmans_eye") \
 	and target != null and is_instance_valid(target) and target is Node2D \
 	and target.has_meta("me_marked"):
 		var _me_hits: int = 0
@@ -4530,7 +4869,7 @@ func _handle_ai(delta: float) -> void:
 		# Close-range katana tap. Reuses Bea's player kit entry point.
 		# _tap_katana sets BEA_ATTACKING; the state machine will return
 		# to AI_FOLLOW after the swing lockout. Print so Bruno can see it.
-		print("[Bea AI T%d] melee swing — target @%.0fpx" % [tier, target_dist])
+		Log.dbg("[Bea AI T%d] melee swing — target @%.0fpx" % [tier, target_dist])
 		_tap_katana()
 		# Run 64b/115 — two-phase cadence. _tap_katana just advanced katana_step;
 		# ==0 means the 4-hit combo's finisher landed. Mid-combo we re-tap fast
@@ -4563,7 +4902,7 @@ func _handle_ai(delta: float) -> void:
 	# Tier-driven cadence overrides the legacy AI_ATTACK_INTERVAL.
 	var iv: float = float(spec.get("ranged_interval", -1.0))
 	if iv > 0.0 and _attack_timer <= 0.0 and target_dist <= AI_ATTACK_RANGE * 1.2:
-		print("[Bea AI T%d] kunai @%.0fpx (iv=%.2f)" % [tier, target_dist, iv])
+		Log.dbg("[Bea AI T%d] kunai @%.0fpx (iv=%.2f)" % [tier, target_dist, iv])
 		_throw_kunai(dir)
 		# +/-15% jitter so partner shots feel organic, not metronomic.
 		_attack_timer = iv * (0.85 + randf() * 0.30)
@@ -4708,7 +5047,7 @@ func _spawn_kunai(dir: Vector2, forward_extra: float) -> void:
 	# (the reset gates the rest). roll_crit_mult is called ONLY when armed, so we
 	# don't add natural crit chance to the kunai — just the Drawn Bow guarantee.
 	if RunState.bea_has("drawn_bow") and _no_attack_timer >= RunState.DRAWN_BOW_IDLE:
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("bea")
 		dmg = int(round(float(dmg) * RunState.roll_crit_mult("ranged", "bea")))
 	_no_attack_timer = 0.0
 	if RunState.bea_has("bananarang") and k.has_method("launch_bananarang"):
@@ -4772,6 +5111,33 @@ func trigger_team_game_over() -> void:
 # Chi
 # ============================================================
 
+# Run 168 — FRACTIONAL entry point for every damage-scaled Chi award.
+#
+# _add_chi() takes an int, so every damage-scaled call site had to truncate
+# BEFORE calling it:  _add_chi(int(CHI_PER_DAMAGE_DEALT * dmg)). With the rate
+# dropped to 0.30 that would silently award ZERO Chi for any hit under 4 damage,
+# which would have hit fast-multi-hit builds (flurry, whirl, naginata pokes)
+# far harder than the intended ~40% nerf.
+#
+# This overload keeps the value in float, applies the same Cold Waters / Poison
+# Apple scaling _add_chi does, then banks the remainder in HeroBase's shared
+# accumulator so no fraction is ever thrown away.
+#
+# NOTE: the boon multipliers are applied BEFORE banking, exactly as in _add_chi.
+# Doing it the other way round would let a 0.5x Cold Waters halving round a
+# banked point back up to a full one.
+func _add_chi_f(raw: float) -> void:
+	if raw <= 0.0:
+		return
+	var _chi_mult: float = 0.5 if RunState.bea_has("corrupt_watermelon") else 1.0
+	_chi_mult *= (1.0 + RunState.get_poison_apple_conversion_pct("bea"))
+	var whole: int = _chi_award_whole(raw * _chi_mult)
+	if whole <= 0:
+		return
+	current_chi = min(get_effective_max_chi(), current_chi + whole)
+	emit_signal("bea_chi_changed", current_chi, get_effective_max_chi())
+
+
 func _add_chi(amount: int) -> void:
 	# Run 139 — central Chi-gain scaling for Bea: Cold Waters halving (taker
 	# only; was missing on Bea entirely) + Poison Apple conversion bonus.
@@ -4790,7 +5156,7 @@ func _add_chi(amount: int) -> void:
 # her RANGED hits built no combo and no chi. Chi routes through _add_chi (which
 # applies Cold Waters / Poison Apple scaling); combo through _bump_combo.
 func _on_hit_connected(dmg: int) -> void:
-	_add_chi(int(CHI_PER_DAMAGE_DEALT * float(dmg)))
+	_add_chi_f(CHI_PER_DAMAGE_DEALT * float(dmg))
 	_bump_combo()
 
 
@@ -4847,7 +5213,8 @@ const HOT_FOOTED_DURATION: float = 3.0
 
 
 func _tick_layered_defense(delta: float) -> void:
-	if not RunState.layered_defense_taken or current_hp <= 0:
+	# Run 157 — picker-only (was the shared global flag).
+	if not RunState.bea_has("layered_defense") or current_hp <= 0:
 		return
 	_layered_defense_tick -= delta
 	if _layered_defense_tick > 0.0:
@@ -5149,6 +5516,77 @@ func _try_evergreen_step_heal() -> void:
 # Fall Harvest — charge-attack kills heal 1% max HP (Apple boon, per-Bea).
 # Call this from charge-attack hit paths when the target dies.
 # ---------------------------------------------------------------------------
+# Run 156 — Bea parity for the four Shino-only slot boons.
+# Sweet Harvest heal arm (Apple Charge): 1% max HP per charge hit, 8s ICD.
+# Her damage arm already worked via get_sweet_harvest_mult; only the heal was
+# missing. ICD ticks in _tick_timers.
+var _bea_sweet_harvest_heal_icd: float = 0.0
+
+func _try_bea_sweet_harvest_heal() -> void:
+	if not RunState.bea_has("sweet_harvest") or _bea_sweet_harvest_heal_icd > 0.0:
+		return
+	var max_hp_eff: int = get_effective_max_hp()
+	var sh_heal: int = max(1, int(round(float(max_hp_eff) * 0.01 * RunState.get_heal_mult("bea"))))
+	current_hp = min(max_hp_eff, current_hp + sh_heal)
+	emit_signal("bea_hp_changed", current_hp, max_hp_eff)
+	FX.spawn_hit_particles(global_position, Color(0.85, 0.35, 0.35, 0.7), 4)
+	_bea_sweet_harvest_heal_icd = 8.0
+
+
+# Coco-Slam (Coconut Charge): ministun + Vulnerable 3s around Bea on X-charge
+# release. Mirrors Player._apply_coco_slam.
+func _bea_apply_coco_slam() -> void:
+	var radius: float = 80.0
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if not is_instance_valid(e) or (e.has_method("is_alive") and not e.is_alive()):
+			continue
+		if global_position.distance_to(e.global_position) > radius:
+			continue
+		var ts: Variant = e.get("status") if e.has_method("get") else null
+		if ts != null and ts.has_method("apply"):
+			ts.apply("bash", 0.4, 1)
+			ts.apply("vulnerable", 3.0, 1)
+	FX.spawn_burst_particles(global_position, Color(0.72, 0.50, 0.22, 0.9), 12)
+	FX.play_sound("coco_slam", 0.85)
+
+
+# Bull Rush (Broccoli B/dash): flat contact damage to enemies Bea dashes into.
+# Mirrors Player._apply_bull_rush_damage.
+func _bea_apply_bull_rush_damage() -> void:
+	var radius: float = 40.0
+	var dmg: int = int(round(20.0 * RunState.get_char_damage_mult("bea")))
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if not is_instance_valid(e) or (e.has_method("is_alive") and not e.is_alive()):
+			continue
+		if global_position.distance_to(e.global_position) > radius:
+			continue
+		if e.has_method("take_damage"):
+			e.set_meta("last_damager", "bea")   # Run 134 — killer attribution
+			FX.hit_rumble("bea")
+			e.take_damage(dmg, (e.global_position - global_position).normalized())
+	FX.spawn_burst_particles(global_position, Color(0.20, 0.65, 0.30, 0.85), 10)
+
+
+# Bunch Burst (Grape Charge): the charge finish hits 2 extra times at 50%.
+# Shino fires this on his flurry final; Bea's equivalent beat is the whirl end.
+func _bea_apply_bunch_burst(origin: Vector2, radius: float, base_dmg: int) -> void:
+	if not RunState.bea_has("bunch_burst"):
+		return
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if not is_instance_valid(e) or not e.has_method("take_damage"):
+			continue
+		if e.has_method("is_alive") and not e.is_alive():
+			continue
+		var to_e: Vector2 = e.global_position - origin
+		if to_e.length() > radius:
+			continue
+		var burst_dmg: int = max(1, int(round(float(_bea_scale_damage(base_dmg, true, false, e, "charge")) * RunState.BUNCH_BURST_DMG_PCT)))
+		for _i in range(RunState.BUNCH_BURST_HITS):
+			e.set_meta("last_damager", "bea")
+			FX.hit_rumble("bea")
+			e.take_damage(burst_dmg, to_e.normalized() if to_e.length() > 0.01 else facing)
+
+
 func _try_bea_fall_harvest_heal(target: Node) -> void:
 	var pct: float = RunState.get_fall_harvest_heal_pct_for("bea")
 	if pct <= 0.0:
@@ -5243,7 +5681,9 @@ func _get_nearest_enemy() -> Node:
 func _bea_try_hulk_smash(origin: Vector2) -> void:
 	if not RunState.bea_has("hulk_smash"):
 		return
-	var combo_ct: int = _shino.combo_count if (_shino != null and is_instance_valid(_shino)) else 0
+	# Run 156 — own combo meter (was _shino.combo_count, which zeroed Bea's Hulk
+	# Smash radius/damage whenever Shino wasn't a valid node).
+	var combo_ct: int = combo_count
 	var radius: float = RunState.get_hulk_smash_radius(combo_ct)
 	var dmg: int = RunState.get_hulk_smash_damage(combo_ct)
 	for e in get_tree().get_nodes_in_group("enemy"):
@@ -5505,7 +5945,7 @@ func _ai_try_dash_through_barrier(goal_dir: Vector2, goal_dist: float) -> bool:
 		return false                # first blocker is solid (a wall) — let unstick steer
 	# A dashable barrier is directly between her and the goal: phase through it.
 	facing = dir                    # _start_dash uses facing when there's no input
-	print("[Bea AI] Dashing through barrier to reach goal.")
+	Log.dbg("[Bea AI] Dashing through barrier to reach goal.")
 	_start_dash()
 	return true
 

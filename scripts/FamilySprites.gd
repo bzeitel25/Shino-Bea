@@ -9,6 +9,15 @@ extends Node
 # Strips live in res://Assets/Sprites/Families/ as
 #   <family>_<member>_idle_<rotten|unripe|ripe|restored>.png
 # All 4 tiers (including Restored/Human) now covered for every family.
+#
+# Run 167 (2026-08-19) — two additions:
+#   * the ten `*_r2` / `*_r4` members Run 149 sliced and never placed
+#     in a scene: the townsfolk who now stand around BOTH Seedy City
+#     squares (see TownFolk.gd / TownBuild.gd).
+#   * the DRAGON FRUIT family — the carnival troupe (Family_Roster
+#     §4.11), all four tiers, idle + 6-frame walk. Nova reads the
+#     crystal ball, Pitaya barks the show, Jangles clowns, and Tally
+#     (the hooded boy) runs the town shop stand between biomes.
 # ============================================================
 
 const DIR := "res://Assets/Sprites/Families/"
@@ -36,6 +45,19 @@ const TARGET_H := {
 	"russel": 64, "tot": 48, "wedge": 46,
 	# Onion
 	"alliam": 64, "lottie": 48, "pearl": 46,
+	# ── Run 167: the never-placed townsfolk (sliced in Run 149) ──
+	"banana_r2": 60,     # strutting showman banana
+	"banana_r4": 48,     # kid medic with the red-cross satchel
+	"broccoli_r4": 62,   # weightlifter mid-press
+	"carrot_r2": 62,     # cloaked archer
+	"carrot_r4": 50,     # spotter with the spyglass
+	"grape_r4": 52,      # armoured squad grape
+	"onion_r4": 54,      # basket vendor
+	"pepper_r4": 56,     # apron + frying pan cook
+	"potato_r4": 52,     # pickaxe miner
+	"melon_r4": 54,      # produce-tray vendor
+	# ── Run 167: Dragon Fruit carnival troupe ──
+	"nova": 62, "pitaya": 66, "jangles": 58, "tally": 52,
 }
 
 # member -> family id used by RunState.FAM_COLOR / FamilyLore.
@@ -50,6 +72,15 @@ const MEMBER_FAMILY := {
 	"flambeau": "pepper", "rika": "pepper", "nino": "pepper",
 	"russel": "potato", "tot": "potato", "wedge": "potato",
 	"alliam": "onion", "lottie": "onion", "pearl": "onion",
+	# Run 167 — townsfolk
+	"banana_r2": "banana", "banana_r4": "banana",
+	"broccoli_r4": "broccoli",
+	"carrot_r2": "carrot", "carrot_r4": "carrot",
+	"grape_r4": "grape", "onion_r4": "onion", "pepper_r4": "pepper",
+	"potato_r4": "potato", "melon_r4": "watermelon",
+	# Run 167 — Dragon Fruit carnival troupe
+	"nova": "dragonfruit", "pitaya": "dragonfruit",
+	"jangles": "dragonfruit", "tally": "dragonfruit",
 }
 
 # strip name -> [frames, cell_w, cell_h, content_h]
@@ -185,6 +216,80 @@ const DB := {
 	"onion_pearl_idle_unripe": [1, 176, 335, 335],
 	"onion_pearl_idle_ripe": [1, 174, 334, 334],
 	"onion_pearl_idle_restored": [1, 165, 309, 309],
+	# ── Run 167: townsfolk (sliced Run 149, first placed Run 167) ──
+	"banana_banana_r2_idle_rotten": [1, 233, 385, 385],
+	"banana_banana_r2_idle_unripe": [1, 232, 384, 384],
+	"banana_banana_r2_idle_ripe": [1, 216, 398, 398],
+	"banana_banana_r2_idle_restored": [1, 184, 394, 394],
+	"banana_banana_r4_idle_rotten": [1, 160, 301, 301],
+	"banana_banana_r4_idle_unripe": [1, 159, 301, 301],
+	"banana_banana_r4_idle_ripe": [1, 239, 300, 300],
+	"banana_banana_r4_idle_restored": [1, 233, 286, 286],
+	"broccoli_broccoli_r4_idle_rotten": [1, 274, 302, 302],
+	"broccoli_broccoli_r4_idle_unripe": [1, 273, 301, 301],
+	"broccoli_broccoli_r4_idle_ripe": [1, 320, 310, 310],
+	"broccoli_broccoli_r4_idle_restored": [1, 319, 308, 308],
+	"carrot_carrot_r2_idle_rotten": [1, 280, 392, 392],
+	"carrot_carrot_r2_idle_unripe": [1, 280, 370, 370],
+	"carrot_carrot_r2_idle_ripe": [1, 279, 391, 391],
+	"carrot_carrot_r2_idle_restored": [1, 265, 369, 369],
+	"carrot_carrot_r4_idle_rotten": [1, 177, 298, 298],
+	"carrot_carrot_r4_idle_unripe": [1, 209, 303, 303],
+	"carrot_carrot_r4_idle_ripe": [1, 208, 302, 302],
+	"carrot_carrot_r4_idle_restored": [1, 213, 291, 291],
+	"grape_grape_r4_idle_rotten": [1, 208, 311, 311],
+	"grape_grape_r4_idle_unripe": [1, 209, 311, 311],
+	"grape_grape_r4_idle_ripe": [1, 208, 310, 310],
+	"grape_grape_r4_idle_restored": [1, 180, 326, 326],
+	"onion_onion_r4_idle_rotten": [1, 137, 296, 296],
+	"onion_onion_r4_idle_unripe": [1, 157, 296, 296],
+	"onion_onion_r4_idle_ripe": [1, 166, 295, 295],
+	"onion_onion_r4_idle_restored": [1, 143, 264, 264],
+	"pepper_pepper_r4_idle_rotten": [1, 252, 315, 315],
+	"pepper_pepper_r4_idle_unripe": [1, 246, 315, 315],
+	"pepper_pepper_r4_idle_ripe": [1, 260, 316, 316],
+	"pepper_pepper_r4_idle_restored": [1, 262, 285, 285],
+	"potato_potato_r4_idle_rotten": [1, 133, 280, 280],
+	"potato_potato_r4_idle_unripe": [1, 143, 280, 280],
+	"potato_potato_r4_idle_ripe": [1, 194, 276, 276],
+	"potato_potato_r4_idle_restored": [1, 178, 269, 269],
+	"watermelon_melon_r4_idle_rotten": [1, 177, 300, 300],
+	"watermelon_melon_r4_idle_unripe": [1, 176, 298, 298],
+	"watermelon_melon_r4_idle_ripe": [1, 137, 302, 302],
+	"watermelon_melon_r4_idle_restored": [1, 143, 284, 284],
+	# ── Run 167: Dragon Fruit carnival troupe (idle + 6-frame walk) ──
+"dragonfruit_nova_idle_rotten": [1, 170, 373, 373],
+	"dragonfruit_nova_walk_rotten": [6, 165, 377, 377],
+	"dragonfruit_pitaya_idle_rotten": [1, 329, 414, 414],
+	"dragonfruit_pitaya_walk_rotten": [6, 170, 416, 416],
+	"dragonfruit_jangles_idle_rotten": [1, 212, 342, 342],
+	"dragonfruit_jangles_walk_rotten": [6, 139, 343, 343],
+	"dragonfruit_tally_idle_rotten": [1, 144, 323, 323],
+	"dragonfruit_tally_walk_rotten": [6, 142, 325, 325],
+	"dragonfruit_nova_idle_unripe": [1, 169, 372, 372],
+	"dragonfruit_nova_walk_unripe": [6, 165, 376, 376],
+	"dragonfruit_pitaya_idle_unripe": [1, 273, 414, 414],
+	"dragonfruit_pitaya_walk_unripe": [6, 169, 416, 416],
+	"dragonfruit_jangles_idle_unripe": [1, 211, 342, 342],
+	"dragonfruit_jangles_walk_unripe": [6, 139, 351, 351],
+	"dragonfruit_tally_idle_unripe": [1, 144, 323, 323],
+	"dragonfruit_tally_walk_unripe": [6, 142, 325, 325],
+	"dragonfruit_nova_idle_ripe": [1, 168, 372, 372],
+	"dragonfruit_nova_walk_ripe": [6, 164, 376, 376],
+	"dragonfruit_pitaya_idle_ripe": [1, 273, 390, 390],
+	"dragonfruit_pitaya_walk_ripe": [6, 170, 402, 402],
+	"dragonfruit_jangles_idle_ripe": [1, 223, 352, 352],
+	"dragonfruit_jangles_walk_ripe": [6, 151, 351, 351],
+	"dragonfruit_tally_idle_ripe": [1, 142, 323, 323],
+	"dragonfruit_tally_walk_ripe": [6, 142, 318, 318],
+	"dragonfruit_nova_idle_restored": [1, 179, 371, 371],
+	"dragonfruit_nova_walk_restored": [6, 173, 367, 367],
+	"dragonfruit_pitaya_idle_restored": [1, 313, 390, 390],
+	"dragonfruit_pitaya_walk_restored": [6, 250, 397, 397],
+	"dragonfruit_jangles_idle_restored": [1, 255, 342, 342],
+	"dragonfruit_jangles_walk_restored": [6, 179, 342, 342],
+	"dragonfruit_tally_idle_restored": [1, 166, 303, 303],
+	"dragonfruit_tally_walk_restored": [6, 154, 301, 301],
 }
 
 

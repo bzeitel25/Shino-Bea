@@ -187,12 +187,22 @@ func _ready() -> void:
 	call_deferred("_auto_detect_breakbar")
 
 
+# Run 168 — is this component bolted to one of the two ninjas (rather than an
+# enemy)? Groups are the source of truth: Shino joins "player"; Bea joins BOTH
+# "bea" and "player" (she is added to "player" so door/pickup triggers see her),
+# so testing "player" alone covers both heroes and neither enemy.
+func _host_is_hero() -> bool:
+	if host == null or not is_instance_valid(host):
+		return false
+	return host.is_in_group("player") or host.is_in_group("bea")
+
+
 func _auto_detect_breakbar() -> void:
 	if host == null or not is_instance_valid(host):
-		print("[BreakBar] _auto_detect: host is null/invalid")
+		Log.dbg("[BreakBar] _auto_detect: host is null/invalid")
 		return
 	var groups: Array = host.get_groups()
-	print("[BreakBar] _auto_detect on %s — groups: %s" % [host.name, str(groups)])
+	Log.dbg("[BreakBar] _auto_detect on %s — groups: %s" % [host.name, str(groups)])
 	if host.is_in_group("boss"):
 		breakbar_enabled = true
 		breakbar_max = BREAKBAR_MAX_BOSS
@@ -202,7 +212,7 @@ func _auto_detect_breakbar() -> void:
 		breakbar_max = BREAKBAR_MAX_MINIBOSS
 		breakbar_current = breakbar_max
 	if breakbar_enabled:
-		print("[BreakBar] ENABLED on %s — max %.0f" % [host.name, breakbar_max])
+		Log.dbg("[BreakBar] ENABLED on %s — max %.0f" % [host.name, breakbar_max])
 		# Route breakbar changes through FX bus so HUD can display the bar.
 		breakbar_changed.connect(_on_breakbar_changed_relay)
 		# Local breakbar visual bar above the enemy sprite.
@@ -211,7 +221,7 @@ func _auto_detect_breakbar() -> void:
 		# Emit initial state so HUD seeds correctly.
 		emit_signal("breakbar_changed", breakbar_current, breakbar_max, false)
 	else:
-		print("[BreakBar] NOT enabled on %s (no boss/miniboss group)" % host.name)
+		Log.dbg("[BreakBar] NOT enabled on %s (no boss/miniboss group)" % host.name)
 
 
 func _on_breakbar_changed_relay(current: float, max_val: float, is_broken: bool) -> void:
@@ -221,6 +231,28 @@ func _on_breakbar_changed_relay(current: float, max_val: float, is_broken: bool)
 
 
 func _process(delta: float) -> void:
+	# ============================================================
+	# Run 168 — FULL STATUS PAUSE FOR HEROES DURING ANY ULT CINEMATIC.
+	# ============================================================
+	# This component ticks in its OWN _process, completely independently of the
+	# host's _physics_process. That independence is why the ult freeze leaked
+	# damage: while the frozen partner's _physics_process was early-returning
+	# (no movement, no input, no healing, no dodge), THIS loop happily kept
+	# rolling burn and poison ticks straight into her HP. Over a ~3s cinematic a
+	# survivable stack turned lethal, which is what Bruno saw as "Shino's ult
+	# killed Bea".
+	#
+	# HeroBase.take_damage() already hard-refuses damage during a cinematic, so
+	# the DoT could not land anyway — but returning here matters for a second
+	# reason: it also stops `remaining` from ticking down. Without that, a hero
+	# would silently burn 3 seconds off every one of her debuffs while the
+	# camera was busy, so an ult would double as a free cleanse. Freeze means
+	# freeze in BOTH directions: no damage out, no duration off.
+	#
+	# Enemies are deliberately NOT exempted here — they are process-disabled
+	# wholesale by UltFreeze, which stops this component along with them.
+	if _host_is_hero() and RunState.ult_cinematic_active():
+		return
 	# --- Breakbar tick (Run 117) ---
 	if breakbar_enabled:
 		_tick_breakbar(delta)
@@ -418,7 +450,7 @@ func _trigger_breakbar_broken() -> void:
 	if is_instance_valid(host) and host is Node2D:
 		FX.spawn_burst_particles(host.global_position, Color(0.95, 0.85, 0.20, 1.0), 18)
 		FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_SHORT)
-	print("[BreakBar] BROKEN on %s — %0.1fs stun" % [host.name if host else "?", BREAKBAR_BROKEN_STUN])
+	Log.dbg("[BreakBar] BROKEN on %s — %0.1fs stun" % [host.name if host else "?", BREAKBAR_BROKEN_STUN])
 
 
 func _spawn_breakbar_pip(amount: float) -> void:
@@ -901,7 +933,7 @@ func _do_combust_explosion() -> void:
 				if not body.status.has("combusted"):
 					body.status.apply("burning", COMBUST_SPREAD_DUR, COMBUST_SPREAD_STACKS)
 
-	print("[Combust] Detonated at %s — radius %dpx, %d flat dmg, spreading %d Burn stacks" % [
+	Log.dbg("[Combust] Detonated at %s — radius %dpx, %d flat dmg, spreading %d Burn stacks" % [
 		origin, int(COMBUST_RADIUS), COMBUST_FLAT_DMG, COMBUST_SPREAD_STACKS])
 
 

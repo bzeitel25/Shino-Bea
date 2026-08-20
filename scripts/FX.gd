@@ -107,9 +107,24 @@ func screen_shake(magnitude: float, duration: float) -> void:
 	# Run 54 — scale every shake by the player's Settings preference
 	# (shake_intensity, or 0 when shake is disabled). Done here so all call
 	# sites are covered and a 0 setting fully silences the screen.
+	# Phase 6a — capture the UNSCALED request before the shake setting is
+	# applied. Rumble is driven off this raw value and fired before the early
+	# return below, because screen shake and rumble are separate accessibility
+	# choices: a player who turns shake off (motion sensitivity) should keep
+	# their haptics, and lowering shake intensity should not quietly halve them.
+	var raw_magnitude: float = magnitude
+
 	var _s := get_node_or_null("/root/Settings")
 	if _s and _s.has_method("get_shake_mult"):
 		magnitude *= _s.get_shake_mult()
+
+	# NOTE (2026-08-01): screen shake NO LONGER drives rumble. Bruno's rule is
+	# that haptics fire on a hit CONNECTING, from the ninja that player is
+	# controlling — whereas screen_shake also fires on whiffs, on the partner's
+	# attacks, and on world events. Rumble is now raised explicitly at the
+	# connect/charge sites instead. See hit_rumble() / charge_rumble() below.
+	# `raw_magnitude` is retained for the shake logic only.
+
 	if magnitude <= 0.0:
 		return
 	# If a louder shake comes in, override; otherwise leave existing in place.
@@ -120,7 +135,183 @@ func screen_shake(magnitude: float, duration: float) -> void:
 		_shake_duration = duration
 		_shake_magnitude = magnitude
 	if SHAKE_VERBOSE:
-		print("[FX] shake mag=%.1f dur=%.2fs" % [magnitude, duration])
+		Log.dbg("[FX] shake mag=%.1f dur=%.2fs" % [magnitude, duration])
+
+
+# -------------------------------------------------------
+# Phase 6a — controller rumble
+# -------------------------------------------------------
+# The game shipped with no haptics at all. Rather than add rumble calls to
+# ~110 impact sites, it hangs off screen_shake() — the one function every
+# impact in the game already calls — so rumble intensity automatically tracks
+# what the screen is doing and stays consistent for free.
+#
+# In 2P both pads buzz: the screen shake is a shared-screen effect, so shared
+# haptics match it. In 1P there is normally one pad and it just works.
+#
+# Godot's API is start_joy_vibration(device, weak, strong, duration):
+#   weak   = the high-frequency buzzy motor
+#   strong = the low-frequency rumble motor
+# Mapping magnitude to mostly-strong with a little weak reads as "impact"
+# rather than "phone notification".
+const RUMBLE_REF_MAGNITUDE: float = 14.0   # SHAKE_ULT — the loudest normal shake
+
+# ── IMPACT MODEL (Bruno's spec, 2026-08-01) ─────────────────
+# "Each hit is a split-second Bzzt. Bzzt. Bzzt. for each hit in a 4-hit combo.
+#  The vibration should never last longer than it takes for the next hit to
+#  land, so there is no spillover from one hit's buzz into the next."
+#
+# So rumble is a PULSE, not a sustain. Every hit re-triggers; loudness is
+# expressed through motor STRENGTH, never through duration.
+#
+# The numbers are derived from the game's real attack cadence:
+#   Shino.ATTACK_ANIM_DURATION   = 0.20s per combo slice  <- the normal case
+#   Bea.KATANA_COMBO_STEPS/WINDOW= 4 hits / 0.70s
+#   Bea.SHURIKEN_WAVE_INTERVAL   = 0.05s                  <- the tightest burst
+#
+# PULSE (0.06s) < RETRIGGER GAP (0.07s) is the guarantee: two pulses can never
+# overlap, so there is always at least ~10ms of silence between them and each
+# hit is felt as its own tap.
+#
+# WHY 70ms AND NOT HIGHER
+# A longer retrigger window (110ms+) would fold Bea's 3-wave shuriken volley
+# into a single tap, which is tidier. It was rejected because attack speed is an
+# UNCAPPED multiplier (Shino.gd:2087 — get_char_attack_speed_mult has a floor,
+# no ceiling), so a boon-heavy build compresses the 200ms combo cadence toward
+# 100ms. At 110ms the game would start silently DROPPING combo hits on exactly
+# the builds that hit hardest — a direct violation of "a bzzt for every hit".
+# 70ms keeps every combo hit at any realistic attack speed.
+#
+# The accepted trade: the 0.05s shuriken volley (t=0/50/100) yields two pulses
+# rather than one. They still do not overlap, and two quick taps read fine as a
+# flurry — this is a cosmetic imperfection, not a spec violation.
+const RUMBLE_PULSE_SEC: float = 0.06       # the "bzzt"
+const RUMBLE_RETRIGGER_MS: int = 70        # must exceed RUMBLE_PULSE_SEC
+const RUMBLE_MIN_DURATION: float = 0.02    # ⚠ Godot treats duration 0 as INFINITE
+const RUMBLE_MAX_DURATION: float = 0.35    # ceiling for explicit sustained calls
+
+# Preset strengths for the three haptic events.
+const RUMBLE_HIT: float          = 0.75   # a hit connecting
+const RUMBLE_HIT_HEAVY: float    = 1.00   # finisher / charged release
+const RUMBLE_CHARGE_READY: float = 0.28   # tiny "you can let go now" tick
+const RUMBLE_HURT: float         = 0.65   # you took a hit
+
+## Last pulse per DEVICE, not global. In local 2P each player has their own
+## no-overlap window, so P1 mid-combo can never swallow P2's hits.
+var _rumble_last_ms_by_dev: Dictionary = {}
+
+
+# ---------------------------------------------------------------------------
+# Targeted haptics  (Bruno's spec 2026-08-01)
+# ---------------------------------------------------------------------------
+# Rumble belongs to the PLAYER WHO CAUSED IT, and only fires when something
+# actually happens — a hit connecting, a charge coming ready, a charge
+# releasing. Never on a whiff, never from the AI partner's attacks, and never
+# from the other player's hits in local 2P.
+#
+# Screen shake stays global and shared (it is one screen), which is exactly why
+# the two systems are now decoupled: shake is about the SCENE, rumble is about
+# YOUR hands.
+
+## A hit from `who` ("shino"/"bea") connected. Call at the moment damage lands.
+## Safe to call in an AoE loop — the per-device retrigger window collapses a
+## multi-enemy hit into one pulse, so a 5-enemy sweep is one bzzt, while a
+## 4-hit combo is four.
+func hit_rumble(who: String, heavy: bool = false) -> void:
+	var strength: float = RUMBLE_HIT_HEAVY if heavy else RUMBLE_HIT
+	pulse_for_hero(who, strength)
+
+
+## Charge state feedback. `ready` = the tiny tick when the charge is armed;
+## otherwise the fuller thump on release.
+func charge_rumble(who: String, ready: bool) -> void:
+	if ready:
+		pulse_for_hero(who, RUMBLE_CHARGE_READY)
+	else:
+		pulse_for_hero(who, RUMBLE_HIT_HEAVY)
+
+
+## `who` took damage — buzz their own pad only.
+func hurt_rumble(who: String) -> void:
+	pulse_for_hero(who, RUMBLE_HURT)
+
+
+## Core entry point: pulse the pad(s) belonging to hero `who`.
+## `strength` is 0..1 BEFORE the player's rumble-strength multiplier.
+func pulse_for_hero(who: String, strength: float, duration: float = RUMBLE_PULSE_SEC) -> void:
+	_pulse(_devices_for_hero(who), strength * 0.55, strength, duration)
+
+
+## Resolves which physical pads should feel an event caused by `who`.
+##
+## Returns EMPTY (no rumble) when:
+##   * that hero is AI-controlled — you only feel your own ninja
+##   * that hero's device is the keyboard (-1)
+##   * rumble is disabled or no pad is connected
+func _devices_for_hero(who: String) -> Array:
+	var hero: Node = null
+	for p in get_tree().get_nodes_in_group("player"):
+		if is_instance_valid(p) and "hero_id" in p and String(p.hero_id) == who:
+			hero = p
+			break
+	if hero == null:
+		return []
+	# Only the ninja the player is actually driving produces haptics.
+	if "player_controlled" in hero and not bool(hero.player_controlled):
+		return []
+
+	var rs: Node = get_node_or_null("/root/RunState")
+	if rs != null and "two_player" in rs and bool(rs.two_player):
+		# Local 2P: route strictly to that player's own pad.
+		var dev: int = -1
+		if who == "shino" and "shino_device" in rs:
+			dev = int(rs.shino_device)
+		elif who == "bea" and "bea_device" in rs:
+			dev = int(rs.bea_device)
+		return [dev] if dev >= 0 else []   # -1 = keyboard, nothing to buzz
+
+	# 1P (and online, where each machine has one local player): whatever pad
+	# this machine has.
+	return Input.get_connected_joypads()
+
+
+## Low-level pulse. Enforces the settings check and the per-device no-overlap
+## guarantee. `weak`/`strong` are pre-multiplier.
+func _pulse(devices: Array, weak: float, strong: float, duration: float) -> void:
+	if devices.is_empty():
+		return
+	var s := get_node_or_null("/root/Settings")
+	var mult: float = 1.0
+	if s and s.has_method("get_rumble_mult"):
+		mult = float(s.get_rumble_mult())
+	if mult <= 0.0:
+		return   # rumble disabled — entirely independent of the shake setting
+
+	var s_mag: float = clampf(strong * mult, 0.0, 1.0)
+	var w_mag: float = clampf(weak * mult, 0.0, 1.0)
+	if s_mag <= 0.0 and w_mag <= 0.0:
+		return
+
+	var dur: float = clampf(duration, RUMBLE_MIN_DURATION, RUMBLE_MAX_DURATION)
+	var now: int = Time.get_ticks_msec()
+	for dev in devices:
+		var last: int = int(_rumble_last_ms_by_dev.get(dev, -100000))
+		if now - last < RUMBLE_RETRIGGER_MS:
+			continue   # would overlap this pad's previous pulse
+		_rumble_last_ms_by_dev[dev] = now
+		Input.start_joy_vibration(dev, w_mag, s_mag, dur)
+
+
+## For the rare genuinely-sustained moment (team defeat, a boss landing).
+func rumble_sustained(who: String, strength: float, duration: float) -> void:
+	pulse_for_hero(who, strength, clampf(duration, RUMBLE_PULSE_SEC, RUMBLE_MAX_DURATION))
+
+
+## Immediately silences all pads — used when the player turns rumble off.
+func stop_rumble() -> void:
+	_rumble_last_ms_by_dev.clear()
+	for dev in Input.get_connected_joypads():
+		Input.stop_joy_vibration(dev)
 
 
 func get_shake_offset() -> Vector2:
@@ -596,8 +787,7 @@ func _spawn_dragon_finisher(pos: Vector2, base_scale: float, parent: Node) -> vo
 	spr.z_index = 50                                          # well above hero + flame
 	parent.add_child(spr)
 	if IMPACT_DRAGON_DEBUG:
-		print("[FX] dragon finisher spawn  pos=", spr.position,
-			"  scale ", s0, "→", s1, "  tex=", tex.resource_path)
+		Log.dbg(str("[FX] dragon finisher spawn  pos=", spr.position, "  scale ", s0, "→", s1, "  tex=", tex.resource_path))
 	var top: Vector2 = spr.position + Vector2(0.0, -IMPACT_DRAGON_RISE)
 	# Motion tween — launched by the uppercut: bursts upward with the punch's
 	# force, then decelerates and glides to the apex. EASE_OUT (fast→slow) is what
@@ -876,25 +1066,58 @@ func spawn_danger_beam(origin: Vector2, direction: Vector2,
 
 
 # -------------------------------------------------------
-# Sound event stubs
+# Sound events  (Phase 2a — now real audio, was a print stub)
 # -------------------------------------------------------
 # All combat code calls FX.play_sound("event_name") instead of touching an
-# AudioStreamPlayer directly. Today it just prints — when audio assets exist,
-# this routes them through a real bus without touching every call-site.
-const SOUND_VERBOSE: bool = true
-const SOUND_RATE_LIMIT: float = 0.04   # min seconds between same-event prints (avoids log spam)
-var _sound_last_played: Dictionary = {}
+# AudioStreamPlayer directly. This function is a THIN FORWARDER to the SFX
+# autoload, which owns the voice pool, rate limiting and the sound bank.
+#
+# WHY IT STAYS HERE: 110 call sites across the combat scripts already call
+# FX.play_sound(). Forwarding rather than replacing means none of them had to
+# change — wiring a new sound is purely a SoundBank.gd data edit.
+#
+# Behaviour when a sound isn't authored yet: SFX no-ops silently. An event
+# declared in SoundBank with an empty "streams" array is silent BY DESIGN and
+# never warns; only genuinely unknown event names warn (typo catcher).
+#
+# The old print()-based stub, its SOUND_VERBOSE flag and its rate-limit
+# bookkeeping are gone — SFX.gd does all of that properly now, and Log.gd
+# handles debug-gated printing project-wide.
+#
+# See: scripts/audio/SFX.gd, scripts/audio/SoundBank.gd
+# Cached SFX autoload reference.
+#
+# WHY CACHE: play_sound() is called from 110 sites, several of them per-frame
+# combat paths (flurry_tick, enemy_hit). get_node_or_null("/root/SFX") does a
+# string path parse and tree walk EVERY call — pointless work in the hottest
+# code in the game. Resolved once, lazily, on first use.
+#
+# Lazily rather than in _ready() because FX is declared BEFORE SFX in the
+# autoload list (SFX has to come after Settings, which creates the audio buses),
+# so at FX._ready() time /root/SFX does not exist yet.
+var _sfx: Node = null
+
+
+func _resolve_sfx() -> Node:
+	if is_instance_valid(_sfx):
+		return _sfx
+	_sfx = get_node_or_null("/root/SFX")
+	return _sfx
 
 
 func play_sound(event_name: String, vol: float = 1.0) -> void:
-	if not SOUND_VERBOSE:
-		return
-	var now: float = float(Time.get_ticks_msec()) / 1000.0
-	var last: float = _sound_last_played.get(event_name, -999.0)
-	if now - last < SOUND_RATE_LIMIT:
-		return
-	_sound_last_played[event_name] = now
-	print("[FX] sound: %s (vol=%.2f)" % [event_name, vol])
+	var s: Node = _resolve_sfx()
+	if s != null:
+		s.play(event_name, vol)
+
+
+## Positional variant — currently non-positional (the camera follows the pair,
+## so everything audible is on-screen). Present so future call sites can pass a
+## world position without needing a signature change later.
+func play_sound_at(event_name: String, world_pos: Vector2, vol: float = 1.0) -> void:
+	var s: Node = _resolve_sfx()
+	if s != null:
+		s.play_at(event_name, world_pos, vol)
 
 
 # -------------------------------------------------------

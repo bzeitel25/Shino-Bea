@@ -82,7 +82,7 @@ const BOON_OFFER_SCENE_PATH: String = "res://scenes/BoonOffer.tscn"
 
 
 func _ready() -> void:
-	print("[World] %s — Phase 5/6: wave + boon flow + physical doors" % arena_name)
+	Log.dbg("[World] %s — Phase 5/6: wave + boon flow + physical doors" % arena_name)
 	# Run 39 — group lookup so AI characters (BeaAI) can query the arena
 	# controller for the consensus-exit rally point without a hard node path.
 	add_to_group("world")
@@ -162,7 +162,7 @@ func _ensure_gate_nodes() -> void:
 		spawn_idx += 1
 		gate_count += 1
 	if spawn_idx > 1:
-		print("[World] Spawned %d runtime gate(s) to reach 3 total." % (spawn_idx - 1))
+		Log.dbg("[World] Spawned %d runtime gate(s) to reach 3 total." % (spawn_idx - 1))
 
 
 # Mirrors the scene-file gate structure: StaticBody2D + Visual (ColorRect)
@@ -253,7 +253,7 @@ func _discover_gates() -> void:
 	# Stable ordering — discovery order from scene file is fine, but we sort
 	# by node name to make GateA / GateB / GateC predictable.
 	_gates.sort_custom(func(a, b): return String(a.name) < String(b.name))
-	print("[World] Discovered %d gate(s): %s" % [_gates.size(), _gate_names_csv()])
+	Log.dbg("[World] Discovered %d gate(s): %s" % [_gates.size(), _gate_names_csv()])
 
 
 func _gate_names_csv() -> String:
@@ -332,21 +332,24 @@ func _on_wave_cleared() -> void:
 		return
 	_wave_cleared = true
 	RunState.arenas_cleared += 1
-	print("[World] All enemies defeated — %s cleared!" % arena_name)
+	# Phase 4 — the legacy Dream Arena chain's equivalent of DreamRoom's
+	# room-cleared hook, so training-mode runs also produce real stats.
+	StatsState.note_room_cleared(RunState.run_stats)
+	Log.dbg("[World] All enemies defeated — %s cleared!" % arena_name)
 
 	# Apple Sweet Dreams — heal 5% max HP on room clear, per-character (§8.1).
 	for p in get_tree().get_nodes_in_group("player"):
 		if p.has_method("apply_sweet_dreams_heal"):
 			var healed: int = p.apply_sweet_dreams_heal()
 			if healed > 0:
-				print("[World] Sweet Dreams healed %s for %d HP." % [p.name, healed])
+				Log.dbg("[World] Sweet Dreams healed %s for %d HP." % [p.name, healed])
 	for b in get_tree().get_nodes_in_group("bea"):
 		if b.is_in_group("player"):
 			continue
 		if b.has_method("apply_sweet_dreams_heal"):
 			var healed_b: int = b.apply_sweet_dreams_heal()
 			if healed_b > 0:
-				print("[World] Sweet Dreams healed Bea for %d HP." % healed_b)
+				Log.dbg("[World] Sweet Dreams healed Bea for %d HP." % healed_b)
 
 	if cleared_label:
 		cleared_label.visible = true
@@ -424,7 +427,7 @@ func _present_boon_offer() -> void:
 		var rolled: String = families[randi() % families.size()]
 		room_family = rolled.capitalize()
 		RunState.commit_door_choice({"type": "boon", "family": rolled, "rarity": ""})
-		print("[World] No prior door pick — rolled family '%s' and locked as pending." % rolled)
+		Log.dbg("[World] No prior door pick — rolled family '%s' and locked as pending." % rolled)
 
 	# Spawn the pickup at world-space center of the arena (0,0).
 	# NOTE: vp * 0.5 is a SCREEN-space value and must NOT be used as a
@@ -435,7 +438,7 @@ func _present_boon_offer() -> void:
 	get_tree().current_scene.add_child(pickup)
 	pickup.global_position = Vector2(0, -60)   # slightly above arena center, always reachable
 	pickup.boon_collected.connect(_after_boon_picked)
-	print("[World] BoonPickup spawned for family '%s' at arena center." % room_family)
+	Log.dbg("[World] BoonPickup spawned for family '%s' at arena center." % room_family)
 
 
 func _after_boon_picked(_boon_id: String) -> void:
@@ -452,7 +455,7 @@ func _after_boon_picked(_boon_id: String) -> void:
 		var healed_total: int = RunState.grant_apple_juice(get_tree())
 		if cleared_label:
 			cleared_label.text = "🧃 JUICE — both heroes restored (+%d HP)\nChoose a door to continue!" % healed_total
-		print("[World] Apple Juice after Arena %d clear (+%d HP)." % [RunState.arenas_cleared, healed_total])
+		Log.dbg("[World] Apple Juice after Arena %d clear (+%d HP)." % [RunState.arenas_cleared, healed_total])
 	else:
 		if cleared_label:
 			if next_scene_path != "":
@@ -501,7 +504,7 @@ func _assign_door_previews_and_open() -> void:
 		# Dictionaries pass by reference in Godot 4, so g already mutated
 		# _gates[i]; assignment kept for readability.
 		_gates[i] = g
-	print("[World] %d/%d doors opened with previews: %s" % [open_count, _gates.size(), _summarize_gate_previews()])
+	Log.dbg("[World] %d/%d doors opened with previews: %s" % [open_count, _gates.size(), _summarize_gate_previews()])
 
 
 # Run 33 — a gate that received no preview this room: remove its LOCKED tag
@@ -724,7 +727,7 @@ func _open_gate(g: Dictionary) -> void:
 	# show the E prompt immediately (body_entered already fired before gate opened).
 	if _boon_collected and bool(_player_near_gate.get(String(g.name), false)):
 		_show_gate_prompt(g, true)
-	print("[World] Gate '%s' opened." % String(g.name))
+	Log.dbg("[World] Gate '%s' opened." % String(g.name))
 
 
 func _open_all_gates() -> void:
@@ -826,12 +829,12 @@ func _show_gate_prompt(g: Dictionary, can_exit: bool) -> void:
 	if not anyone_near or not _boon_collected:
 		prompt.visible = false
 	elif can_exit:
-		prompt.text = "[E]  Enter"
+		InputGlyphs.update_binding(prompt, "[{interact}]  Enter")   # Run 158 — live device glyph
 		prompt.add_theme_color_override("font_color", Color(1.0, 1.0, 0.7))
 		prompt.visible = true
 	elif has_bea:
 		# One player is near but not both — show waiting hint.
-		prompt.text = "Waiting for partner..."
+		InputGlyphs.update_binding(prompt, "Waiting for partner...")
 		prompt.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
 		prompt.visible = true
 	else:
@@ -874,10 +877,10 @@ func _commit_gate_transition(g: Dictionary) -> void:
 
 	if is_final_in_loop:
 		RunState.loops_completed += 1
-		print("[World] Loop %d completed — wrapping back to Arena 1." % RunState.loops_completed)
+		Log.dbg("[World] Loop %d completed — wrapping back to Arena 1." % RunState.loops_completed)
 
 	_pending_next_scene = next_scene_path
-	print("[World] Gate '%s' entered via E — fading to: %s" % [String(g.name), _pending_next_scene])
+	Log.dbg("[World] Gate '%s' entered via E — fading to: %s" % [String(g.name), _pending_next_scene])
 	FX.fade_to_black(0.35, 0.05, 1.0, Callable(self, "_execute_transition"))
 
 

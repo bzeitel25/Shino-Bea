@@ -311,7 +311,7 @@ func _fire_one_volley_shot() -> void:
 
 func _fire_fireball_from_head(head_idx: int) -> void:
 	if _fireball_scene == null:
-		print("[Boss2] No EnemyProjectile.tscn — skipping fireball.")
+		Log.dbg("[Boss2] No EnemyProjectile.tscn — skipping fireball.")
 		return
 	var head_pos: Vector2 = global_position + HEAD_OFFSETS[head_idx]
 	var target: Node2D = _find_player()
@@ -465,7 +465,7 @@ func _die() -> void:
 	# Run 131 — shared on-death boon hook (Juicebox, Wave Crash, Summer's End,
 	# Rotten Core, Plague Layer).
 	RunState.process_enemy_death_boons(self)
-	print("[Boss2] Triheaded Wyrm defeated.")
+	Log.dbg("[Boss2] Triheaded Wyrm defeated.")
 	FX.spawn_burst_particles(global_position, Color(0.85, 0.30, 0.55), 32)
 	if FX.has_method("screen_shake"):
 		FX.screen_shake(FX.SHAKE_HEAVY, FX.SHAKE_DUR_MED)
@@ -485,7 +485,7 @@ func _recalc_phase() -> void:
 		phase = new_phase
 		if FX.has_method("notify_boss_phase"):
 			FX.notify_boss_phase(phase, 3)
-		print("[Boss2] Entering phase %d (HP %d/%d, %.0f%%)." % [phase, current_hp, max_hp, pct * 100.0])
+		Log.dbg("[Boss2] Entering phase %d (HP %d/%d, %.0f%%)." % [phase, current_hp, max_hp, pct * 100.0])
 
 
 # ---------------------------------------------------------------------------

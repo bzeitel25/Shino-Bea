@@ -29,6 +29,30 @@ const DRAGON_FRUIT_RARE_ID: String  = "__dragon_fruit_rare__"  # +2 levels (fier
 # Legacy alias kept so existing code that references APPLE_PIE_ID still compiles.
 const APPLE_PIE_ID: String     = PIE_ID
 
+# ── Run 166 — "Ink & Washi" ofuda boon cards (kanji + scroll look) ──────────
+# Every glyph below is verified present in DotGothic16 (no tofu). See the
+# kanji-audit memory: meaning AND glyph coverage both checked.
+# Rarity ribbon kanji (the tier's flavour glyph).
+const RARITY_KANJI: Dictionary = {
+	"common": "常", "uncommon": "良", "rare": "稀", "epic": "極",
+	"legendary": "伝", "duo": "双", "corrupt": "呪",
+}
+# Per-family element / vegetable kanji, painted in the family colour.
+const FAM_KANJI: Dictionary = {
+	"Apple": "命", "Coconut": "殻", "Broccoli": "力", "Carrot": "矢",
+	"Grape": "房", "Watermelon": "水", "Pepper": "火", "Potato": "芋",
+	"Banana": "雷", "Onion": "毒", "Corrupt": "呪",
+}
+# Ink palette (mirrors UISkin) — kept local so cards read on the washi paper.
+const INK_DARK:   Color = Color(0.10980, 0.09020, 0.07843)   # 1c1714 headings on paper
+const INK_BODY:   Color = Color(0.22745, 0.19216, 0.15686)   # 3a3128 description ink
+const PAPER_DIM:  Color = Color(0.41961, 0.35294, 0.23529)   # 6b5a3c captions on paper
+const CREAM_H:    Color = Color(0.95686, 0.91373, 0.80392)   # f4e9cd ribbon text
+const GOLD_FOCUS: Color = Color(1.0, 0.85098, 0.47843)       # ffd97a focus ring
+
+# Run 166 — restore the OS pointer while the overlay is up (combat may hide it).
+var _prev_mouse_mode: int = Input.MOUSE_MODE_VISIBLE
+
 var _offer: Array = []
 var _picked: bool = false
 var _legendary_locked: bool = false   # Run 46 — door-pick Legendary: no rerolling it away
@@ -71,6 +95,12 @@ var _tutorial_mode: bool = false
 
 func _ready() -> void:
 	layer = 100  # ensure on top of HUD (layer 5/10)
+
+	# Run 166 — combat can hide/capture the pointer; force it visible so the
+	# player can actually see (and click) the boon cards. Restored on close.
+	_prev_mouse_mode = Input.mouse_mode
+	if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 	# Run 141 — Tutorial boon mode: force exactly 3 Broccoli attack-slot boons.
 	if RunState.has_meta("tutorial_boon_mode") and RunState.get_meta("tutorial_boon_mode"):
@@ -122,21 +152,21 @@ func _ready() -> void:
 			# "apple_juice" / "boss" → fall through (room_family may still be set)
 			_:
 				pass
-		print("[BoonOffer] Pending door pick consumed — type=%s family=%s" % [ptype, room_family])
+		Log.dbg("[BoonOffer] Pending door pick consumed — type=%s family=%s" % [ptype, room_family])
 
 	if room_family == "":
 		# Arena 1 (or any door-less entry): random family from the door-eligible list.
 		room_family = String(RunState.DOOR_FAMILIES[randi() % RunState.DOOR_FAMILIES.size()]).capitalize()
-		print("[BoonOffer] No door pick — random room family rolled: %s" % room_family)
+		Log.dbg("[BoonOffer] No door pick — random room family rolled: %s" % room_family)
 
 	# Upgrade auto-picks: show a single card so there's a visual for 1 frame,
 	# then the deferred auto-pick fires immediately (connected signal is ready by then).
 	if _auto_grant_pie:
 		_offer = [PIE_ID]
-		print("[BoonOffer] apple_pie door — auto-granting pie (no card choice).")
+		Log.dbg("[BoonOffer] apple_pie door — auto-granting pie (no card choice).")
 	elif _auto_dragon_fruit:
 		_offer = [DRAGON_FRUIT_ID]
-		print("[BoonOffer] dragon_fruit door — auto-triggering upgrade selection.")
+		Log.dbg("[BoonOffer] dragon_fruit door — auto-triggering upgrade selection.")
 	else:
 		# Normal family boon room.
 		if RunState.current_offer.is_empty():
@@ -149,7 +179,7 @@ func _ready() -> void:
 		if leg_id != "":
 			_offer[0] = leg_id
 			_legendary_locked = true   # Run 46 — guaranteed offers can't be rerolled
-			print("[BoonOffer] Door pick = Legendary → slot 0 locked to %s." % leg_id)
+			Log.dbg("[BoonOffer] Door pick = Legendary → slot 0 locked to %s." % leg_id)
 
 	if _room_family == "":
 		_room_family = room_family   # remember for the header label
@@ -178,7 +208,14 @@ func _finish_with_no_offer() -> void:
 	queue_free()
 
 
+func _exit_tree() -> void:
+	# Run 166 — hand the pointer back to whatever state combat wants.
+	Input.mouse_mode = _prev_mouse_mode
+
+
 func _build_overlay() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	# --- Dimmed full-screen backdrop (click-blocker) ---
 	var backdrop := ColorRect.new()
 	backdrop.color = Color(0, 0, 0, 0.65)
@@ -211,18 +248,35 @@ func _build_overlay() -> void:
 	title.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(title)
 
+	# Run 166 — kanji subtitle under the title (mock's "恩恵を選べ" = "choose a boon").
+	var kanji_sub := Label.new()
+	kanji_sub.text = "恩 恵 を 選 べ"
+	kanji_sub.add_theme_font_override("font", UISkin.font_body)
+	kanji_sub.add_theme_font_size_override("font_size", 18)
+	kanji_sub.add_theme_color_override("font_color", Color(0.63, 0.55, 0.38))
+	kanji_sub.add_theme_color_override("font_outline_color", Color(0.05, 0.04, 0.04))
+	kanji_sub.add_theme_constant_override("outline_size", 3)
+	kanji_sub.anchor_left = 0.0; kanji_sub.anchor_right = 1.0
+	kanji_sub.offset_top = 138.0; kanji_sub.offset_bottom = 162.0
+	kanji_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kanji_sub.process_mode = Node.PROCESS_MODE_ALWAYS
+	kanji_sub.set_meta("_uiskin_done", true)
+	add_child(kanji_sub)
+
 	var subtitle := Label.new()
-	subtitle.text = "Arrow keys / WASD to choose  •  Enter / A to confirm  •  (or click)"
-	# Run 46 — Fated Reroll (Sensei Z): advertise the R key when charges remain.
+	# Run 158 — bound template, so the whole line swaps device on the fly.
+	var sub_tpl: String = "{menu_nav} to choose  •  {accept} to confirm  •  (or click)"
+	# Run 46 — Fated Reroll (Sensei Z): advertise the reroll button when charges remain.
 	if _can_reroll():
-		subtitle.text += "  •  🎲 R / LB = Reroll (%d left)" % RunState.rerolls_left
+		sub_tpl += "  •  🎲 {reroll} = Reroll (%d left)" % RunState.rerolls_left
+	InputGlyphs.bind_label(subtitle, sub_tpl)
 	subtitle.add_theme_font_size_override("font_size", 18)
 	subtitle.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
 	subtitle.anchor_left = 0.0
 	subtitle.anchor_right = 1.0
 	subtitle.anchor_top = 0.0
-	subtitle.offset_top = 140.0
-	subtitle.offset_bottom = 170.0
+	subtitle.offset_top = 166.0
+	subtitle.offset_bottom = 192.0
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(subtitle)
@@ -301,6 +355,7 @@ func _build_overlay() -> void:
 		card.position = Vector2(start_x + i * (CARD_WIDTH + CARD_SPACING), card_y)
 		add_child(card)
 		_cards.append(card)
+		_register_card(card, i)
 	# Auto-highlight first card after all children are in tree.
 	call_deferred("_set_focused", 0)
 
@@ -645,7 +700,7 @@ func _show_dragon_fruit_phase() -> void:
 	var candidates: Array = RunState.get_dragon_fruit_candidates_for(3, who)
 	if candidates.is_empty():
 		# This character has no boons yet — skip their phase.
-		print("[BoonOffer] Dragon Fruit: no boons for %s, skipping." % who)
+		Log.dbg("[BoonOffer] Dragon Fruit: no boons for %s, skipping." % who)
 		if _df_phase == 0:
 			_df_phase = 1
 			_picked = false
@@ -692,7 +747,7 @@ func _show_dragon_fruit_upgrade(candidates: Array) -> void:
 	add_child(title)
 
 	var sub := Label.new()
-	sub.text = "Arrow keys / WASD to choose  •  Enter / A to confirm  •  (or click)"
+	InputGlyphs.bind_label(sub, "{menu_nav} to choose  •  {accept} to confirm  •  (or click)")   # Run 158
 	sub.add_theme_font_size_override("font_size", 18)
 	sub.add_theme_color_override("font_color", Color(0.75, 0.90, 0.75))
 	sub.anchor_left = 0.0; sub.anchor_right = 1.0
@@ -713,6 +768,7 @@ func _show_dragon_fruit_upgrade(candidates: Array) -> void:
 		card.position = Vector2(sx + i * (CARD_WIDTH + CARD_SPACING), cy)
 		add_child(card)
 		_cards.append(card)   # register for keyboard/gamepad nav
+		_register_card(card, i)
 	call_deferred("_set_focused", 0)
 
 
@@ -836,7 +892,7 @@ func _apply_dragon_fruit_upgrade(boon_id: String) -> void:
 	var b_data: Dictionary = RunState.BOON_POOL.get(boon_id, {})
 	var lvl: int = RunState.get_boon_level(boon_id)
 	var who: String = "shino" if _df_phase == 0 else "bea"
-	print("[BoonOffer] Dragon Fruit +%d (%s) applied: %s → level %d" % [_df_levels_up, who, b_data.get("name", boon_id), lvl])
+	Log.dbg("[BoonOffer] Dragon Fruit +%d (%s) applied: %s → level %d" % [_df_levels_up, who, b_data.get("name", boon_id), lvl])
 	# Apply stat refresh only to the picking character.
 	if who == "shino":
 		for p in get_tree().get_nodes_in_group("player"):
@@ -1091,221 +1147,215 @@ func _build_card(boon_id: String) -> Button:
 	var fam: String = b.get("family", "?")
 	var nm:  String = b.get("name", boon_id)
 	var dsc: String = b.get("desc", "")
-	var col: Color  = b.get("color", Color(0.5, 0.5, 0.5))
-	# Run 40 — rarity is the OFFER ROLL for this card (Hades-style), not the
-	# pool entry. Legendary/corrupt pass through as fixed tiers.
+	var col: Color  = b.get("color", RunState.FAM_COLOR.get(fam, Color(0.5, 0.5, 0.5)))
+	# Run 40 — rarity is the OFFER ROLL for this card (Hades-style), not the pool entry.
 	var rarity: String = RunState.get_offer_rarity(boon_id)
-	# Run 16 — rarity-colored border ring (separate from family banner color).
-	# Falls back to family color if the rarity key isn't in the table.
 	var rarity_col: Color = RunState.RARITY_COLOR.get(rarity, col)
 	var rarity_label: String = RunState.RARITY_LABEL.get(rarity, rarity.to_upper())
+	var is_corrupt: bool = bool(b.get("corrupt", false)) or fam == "Corrupt"
 
-	# Use a single Button at card size; layer custom labels on top for richer look.
+	# Run 166 — the element kanji + its colour for the talisman plate. Corrupt
+	# cards take the curse mark; everything else takes its family element glyph.
+	var kanji: String = FAM_KANJI.get(fam, "忍")
+	var elem_col: Color = col
+	var ribbon_key: String = rarity
+	if is_corrupt:
+		kanji = FAM_KANJI.get("Corrupt", "呪")
+		elem_col = RunState.RARITY_COLOR.get("corrupt", Color(0.55, 0.20, 0.55))
+		ribbon_key = "corrupt"
+
+	# ── The ofuda (washi talisman) itself ────────────────────────────────────
+	var card := _make_ofuda_card()
+
+	# Ribbon: "RARE ・ 稀" in the tier colour (corrupt → purple).
+	var ribbon_col: Color = elem_col if is_corrupt else rarity_col
+	_add_ribbon(card, "%s ・ %s" % [rarity_label, RARITY_KANJI.get(ribbon_key, "")], ribbon_col)
+
+	# Element kanji plate.
+	_add_kanji_plate(card, kanji, elem_col)
+
+	# Name — dark sumi ink on the washi, faux-bold, wraps if long.
+	var name_label := _paper_label(nm, 18, INK_DARK)
+	name_label.offset_left = 8; name_label.offset_right = -8
+	name_label.offset_top = 80; name_label.offset_bottom = 118
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.add_theme_color_override("font_outline_color", INK_DARK)
+	name_label.add_theme_constant_override("outline_size", 1)   # faux-bold, not a dark ring
+	card.add_child(name_label)
+
+	# Picker + slot caption ("SHINO - PRIMARY").
+	var picker_tag: String = "SHINO" if _phase == 0 else "BEA"
+	var slot: String = String(b.get("boon_slot", ""))
+	var cap_txt: String = picker_tag
+	if slot != "":
+		cap_txt += " - %s" % _slot_word(slot)
+	var cap := _paper_label(cap_txt, 14, PAPER_DIM)
+	cap.add_theme_font_override("font", UISkin.font_micro)   # Silkscreen micro-caps (ASCII only)
+	cap.offset_top = 120; cap.offset_bottom = 136
+	card.add_child(cap)
+
+	# Run 44 — slot trade-up indicator.
+	var trade_picker: String = "shino" if _phase == 0 else "bea"
+	if RunState.is_slot_replacement_for(trade_picker, boon_id):
+		var old_id: String = String(RunState.owned_slots_by_char.get(trade_picker, {}).get(RunState.get_slot_for_boon(boon_id), ""))
+		var old_nm: String = String(RunState.BOON_POOL.get(old_id, {}).get("name", old_id))
+		var trade_chip := _paper_label("REPLACES %s (+1)" % old_nm.to_upper(), 11, Color(0.60, 0.36, 0.10))
+		trade_chip.offset_top = 136; trade_chip.offset_bottom = 150
+		card.add_child(trade_chip)
+
+	# Brush divider.
+	var div := UISkin.make_divider(150.0)
+	div.anchor_left = 0.0; div.anchor_right = 1.0
+	div.offset_left = 34; div.offset_right = -34
+	div.offset_top = 152; div.offset_bottom = 166
+	div.process_mode = Node.PROCESS_MODE_ALWAYS
+	card.add_child(div)
+
+	# Description — softer ink.
+	var desc_label := _paper_label(dsc, 15, INK_BODY)
+	desc_label.offset_left = 14; desc_label.offset_right = -14
+	desc_label.offset_top = 170; desc_label.offset_bottom = 248
+	desc_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card.add_child(desc_label)
+
+	# Footer: corrupt warning, else the take hint.
+	if is_corrupt:
+		var warn := _paper_label("CANNOT BE REMOVED", 11, Color(0.55, 0.13, 0.11))
+		warn.add_theme_font_override("font", UISkin.font_micro)
+		warn.offset_top = 250; warn.offset_bottom = 272
+		card.add_child(warn)
+	else:
+		var hint_label := Label.new()
+		InputGlyphs.bind_label(hint_label, "{accept} / click")   # Run 158
+		hint_label.add_theme_font_override("font", UISkin.font_body)
+		hint_label.add_theme_font_size_override("font_size", 13)
+		hint_label.add_theme_color_override("font_color", PAPER_DIM)
+		hint_label.add_theme_constant_override("outline_size", 0)
+		hint_label.anchor_right = 1.0
+		hint_label.offset_left = 0; hint_label.offset_right = 0
+		hint_label.offset_top = 250; hint_label.offset_bottom = 272
+		hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hint_label.process_mode = Node.PROCESS_MODE_ALWAYS
+		card.add_child(hint_label)
+
+	# Wire the click → pick this boon
+	card.pressed.connect(func(): _pick(boon_id))
+	return card
+
+
+# ── Run 166 — ofuda card builder helpers ────────────────────────────────────
+
+## A washi talisman Button at card size, using the ofuda 9-slice. Marked so the
+## UISkin walker leaves it alone (we style the whole subtree by hand for paper).
+func _make_ofuda_card() -> Button:
 	var card := Button.new()
 	card.custom_minimum_size = Vector2(CARD_WIDTH, CARD_HEIGHT)
 	card.size = Vector2(CARD_WIDTH, CARD_HEIGHT)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	card.process_mode = Node.PROCESS_MODE_ALWAYS
 	card.flat = false
-	card.text = ""   # we'll add labels manually
-	# Style overrides — outer border = RARITY color (Hades-style tier signal),
-	# inner accent line on bg = family color (mostly hidden behind the family banner).
-	# Border thickness scales with rarity tier so legendaries pop visually.
-	var border_w: int = 4
-	match rarity:
-		"common":    border_w = 3
-		"uncommon":  border_w = 4
-		"rare":      border_w = 5
-		"epic":      border_w = 6
-		"legendary": border_w = 7
-		_:           border_w = 4
-	var stylebox := StyleBoxFlat.new()
-	stylebox.bg_color = Color(0.10, 0.10, 0.13)
-	stylebox.border_color = rarity_col
-	stylebox.border_width_left = border_w
-	stylebox.border_width_right = border_w
-	stylebox.border_width_top = border_w
-	stylebox.border_width_bottom = border_w
-	stylebox.corner_radius_top_left = 12
-	stylebox.corner_radius_top_right = 12
-	stylebox.corner_radius_bottom_left = 12
-	stylebox.corner_radius_bottom_right = 12
-	# Drop-shadow + glow on epic/legendary for extra pop.
-	if rarity == "epic" or rarity == "legendary":
-		stylebox.shadow_color = Color(rarity_col.r, rarity_col.g, rarity_col.b, 0.60)
-		stylebox.shadow_size = 8
-	card.add_theme_stylebox_override("normal", stylebox)
-	var stylebox_hover := stylebox.duplicate() as StyleBoxFlat
-	stylebox_hover.bg_color = Color(0.18, 0.18, 0.22)
-	card.add_theme_stylebox_override("hover", stylebox_hover)
-	var stylebox_pressed := stylebox.duplicate() as StyleBoxFlat
-	stylebox_pressed.bg_color = Color(0.05, 0.05, 0.07)
-	card.add_theme_stylebox_override("pressed", stylebox_pressed)
-
-	# Run 19 — Corrupt boon: overlay magenta→purple-black gradient (two strips)
-	# before the family banner so the card reads as a hostile alternative.
-	var is_corrupt: bool = bool(b.get("corrupt", false)) or fam == "Corrupt"
-	if is_corrupt:
-		var c_top := ColorRect.new()
-		c_top.color = Color(0.85, 0.20, 0.85, 0.55)
-		c_top.anchor_left = 0.0; c_top.anchor_right = 1.0
-		c_top.offset_left = 4; c_top.offset_right = -4
-		c_top.offset_top = 4; c_top.offset_bottom = 100
-		c_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		c_top.process_mode = Node.PROCESS_MODE_ALWAYS
-		card.add_child(c_top)
-		var c_bot := ColorRect.new()
-		c_bot.color = Color(0.18, 0.05, 0.22, 0.85)
-		c_bot.anchor_left = 0.0; c_bot.anchor_right = 1.0
-		c_bot.offset_left = 4; c_bot.offset_right = -4
-		c_bot.offset_top = 100; c_bot.offset_bottom = CARD_HEIGHT - 8
-		c_bot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		c_bot.process_mode = Node.PROCESS_MODE_ALWAYS
-		card.add_child(c_bot)
-		# CORRUPT badge
-		var c_badge := Label.new()
-		c_badge.text = "☠ CORRUPT ☠"
-		c_badge.add_theme_font_size_override("font_size", 13)
-		c_badge.add_theme_color_override("font_color", Color(1.0, 0.55, 1.0))
-		c_badge.add_theme_color_override("font_outline_color", Color(0.1, 0.0, 0.1))
-		c_badge.add_theme_constant_override("outline_size", 4)
-		c_badge.anchor_right = 1.0
-		c_badge.offset_left = 0; c_badge.offset_right = 0
-		c_badge.offset_top = -8; c_badge.offset_bottom = 14
-		c_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		c_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		c_badge.process_mode = Node.PROCESS_MODE_ALWAYS
-		card.add_child(c_badge)
-
-	# Run 19 — Legendary banner: gilded ✦ LEGENDARY ✦ above family banner.
-	if rarity == "legendary" and not is_corrupt:
-		var l_badge := Label.new()
-		l_badge.text = "✦ LEGENDARY ✦"
-		l_badge.add_theme_font_size_override("font_size", 13)
-		l_badge.add_theme_color_override("font_color", Color(1.0, 0.92, 0.40))
-		l_badge.add_theme_color_override("font_outline_color", Color(0.20, 0.10, 0.0))
-		l_badge.add_theme_constant_override("outline_size", 4)
-		l_badge.anchor_right = 1.0
-		l_badge.offset_left = 0; l_badge.offset_right = 0
-		l_badge.offset_top = -8; l_badge.offset_bottom = 14
-		l_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		l_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		l_badge.process_mode = Node.PROCESS_MODE_ALWAYS
-		card.add_child(l_badge)
-
-	# Family banner (colored strip at the top of the card).
-	var family_strip := ColorRect.new()
-	family_strip.color = col
-	family_strip.anchor_left = 0.0; family_strip.anchor_right = 1.0
-	family_strip.offset_left = 4; family_strip.offset_right = -4
-	family_strip.offset_top = 4; family_strip.offset_bottom = 38
-	family_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	family_strip.process_mode = Node.PROCESS_MODE_ALWAYS
-	card.add_child(family_strip)
-
-	var family_label := Label.new()
-	family_label.text = fam.to_upper()
-	family_label.add_theme_font_size_override("font_size", 16)
-	family_label.add_theme_color_override("font_color", Color(0.05, 0.05, 0.05))
-	family_label.anchor_right = 1.0
-	family_label.offset_left = 0
-	family_label.offset_right = 0
-	family_label.offset_top = 8
-	family_label.offset_bottom = 38
-	family_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	family_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	family_label.process_mode = Node.PROCESS_MODE_ALWAYS
-	card.add_child(family_label)
-
-	# Rarity tier label (Run 16) — slim chip under the family banner.
-	var rarity_chip := Label.new()
-	rarity_chip.text = rarity_label
-	rarity_chip.add_theme_font_size_override("font_size", 12)
-	rarity_chip.add_theme_color_override("font_color", rarity_col)
-	rarity_chip.anchor_right = 1.0
-	rarity_chip.offset_left = 0
-	rarity_chip.offset_right = 0
-	rarity_chip.offset_top = 42
-	rarity_chip.offset_bottom = 64
-	rarity_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rarity_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	rarity_chip.process_mode = Node.PROCESS_MODE_ALWAYS
-	card.add_child(rarity_chip)
-
-	# Run 44 — slot trade-up indicator: this pick would replace the picker's
-	# current boon in that slot (old one traded out, new one +1 level; the
-	# rarity shown above was already bumped +1 by the offer roll).
-	var _trade_picker: String = "shino" if _phase == 0 else "bea"
-	if RunState.is_slot_replacement_for(_trade_picker, boon_id):
-		var _old_id: String = String(RunState.owned_slots_by_char.get(_trade_picker, {}).get(RunState.get_slot_for_boon(boon_id), ""))
-		var _old_nm: String = String(RunState.BOON_POOL.get(_old_id, {}).get("name", _old_id))
-		var trade_chip := Label.new()
-		trade_chip.text = "⇄ REPLACES %s (+1 LVL)" % _old_nm.to_upper()
-		trade_chip.add_theme_font_size_override("font_size", 11)
-		trade_chip.add_theme_color_override("font_color", Color(1.0, 0.72, 0.30))
-		trade_chip.anchor_right = 1.0
-		trade_chip.offset_left = 0
-		trade_chip.offset_right = 0
-		trade_chip.offset_top = 56
-		trade_chip.offset_bottom = 72
-		trade_chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		trade_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		trade_chip.process_mode = Node.PROCESS_MODE_ALWAYS
-		card.add_child(trade_chip)
-
-	# Name
-	var name_label := Label.new()
-	name_label.text = nm
-	name_label.add_theme_font_size_override("font_size", 22)
-	name_label.add_theme_color_override("font_color", Color(1, 1, 1))
-	name_label.anchor_right = 1.0
-	name_label.offset_left = 0
-	name_label.offset_right = 0
-	name_label.offset_top = 70
-	name_label.offset_bottom = 120
-	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	name_label.process_mode = Node.PROCESS_MODE_ALWAYS
-	card.add_child(name_label)
-
-	# Run 127 — controller slot badge (Y/X/A/B/Charge/Ult) under the name.
-	_add_slot_badge(card, boon_id, 118.0)
-
-	# Description (multi-line, centered)
-	var desc_label := Label.new()
-	desc_label.text = dsc
-	desc_label.add_theme_font_size_override("font_size", 16)
-	desc_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
-	desc_label.anchor_right = 1.0
-	desc_label.offset_left = 12
-	desc_label.offset_right = -12
-	desc_label.offset_top = 140
-	desc_label.offset_bottom = 240
-	desc_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	desc_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	desc_label.process_mode = Node.PROCESS_MODE_ALWAYS
-	card.add_child(desc_label)
-
-	# "Click to take" hint
-	var hint_label := Label.new()
-	hint_label.text = "→ Enter / click ←"
-	hint_label.add_theme_font_size_override("font_size", 13)
-	hint_label.add_theme_color_override("font_color", col)
-	hint_label.anchor_right = 1.0
-	hint_label.offset_left = 0
-	hint_label.offset_right = 0
-	hint_label.offset_top = 245
-	hint_label.offset_bottom = 270
-	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hint_label.process_mode = Node.PROCESS_MODE_ALWAYS
-	card.add_child(hint_label)
-
-	# Wire the click → pick this boon
-	card.pressed.connect(func(): _pick(boon_id))
+	card.text = ""
+	card.clip_contents = false
+	card.set_meta("_uiskin_skip", true)
+	card.add_theme_stylebox_override("normal", UISkin.ofuda_box())
+	var hov := UISkin.ofuda_box()
+	hov.modulate_color = Color(1.08, 1.05, 0.98)
+	card.add_theme_stylebox_override("hover", hov)
+	card.add_theme_stylebox_override("pressed", UISkin.ofuda_box())
+	card.add_theme_stylebox_override("focus", UISkin.ofuda_box())
 	return card
+
+
+## Rarity/tier ribbon across the top of a card.
+func _add_ribbon(card: Control, text: String, bg: Color) -> void:
+	var ribbon := Panel.new()
+	ribbon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ribbon.process_mode = Node.PROCESS_MODE_ALWAYS
+	ribbon.anchor_left = 0.0; ribbon.anchor_right = 1.0
+	ribbon.offset_left = -2; ribbon.offset_right = 2
+	ribbon.offset_top = -12; ribbon.offset_bottom = 18
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = INK_DARK
+	sb.set_border_width_all(2)
+	ribbon.add_theme_stylebox_override("panel", sb)
+	card.add_child(ribbon)
+
+	var lab := Label.new()
+	lab.text = text
+	lab.add_theme_font_override("font", UISkin.font_body)
+	lab.add_theme_font_size_override("font_size", 13)
+	# Dark ink on light ribbons (gold/yellow), cream on dark ones.
+	lab.add_theme_color_override("font_color", INK_DARK if bg.get_luminance() > 0.5 else CREAM_H)
+	lab.add_theme_constant_override("outline_size", 0)
+	lab.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lab.process_mode = Node.PROCESS_MODE_ALWAYS
+	ribbon.add_child(lab)
+
+
+## The coloured element-kanji square, centred near the top of the card.
+func _add_kanji_plate(card: Control, glyph: String, bg: Color) -> void:
+	var plate := Panel.new()
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plate.process_mode = Node.PROCESS_MODE_ALWAYS
+	plate.size = Vector2(56, 56)
+	plate.position = Vector2((CARD_WIDTH - 56.0) * 0.5, 22.0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = INK_DARK
+	sb.set_border_width_all(3)
+	plate.add_theme_stylebox_override("panel", sb)
+	card.add_child(plate)
+
+	var lab := Label.new()
+	lab.text = glyph
+	lab.add_theme_font_override("font", UISkin.font_body)
+	lab.add_theme_font_size_override("font_size", 40)
+	# Light glyph on saturated/dark plates; dark glyph on pale ones (banana etc.).
+	if bg.get_luminance() > 0.62:
+		lab.add_theme_color_override("font_color", INK_DARK)
+	else:
+		lab.add_theme_color_override("font_color", bg.lerp(Color(1, 1, 1), 0.80))
+	lab.add_theme_constant_override("outline_size", 0)
+	lab.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lab.process_mode = Node.PROCESS_MODE_ALWAYS
+	plate.add_child(lab)
+
+
+## A full-width, centred label styled for dark ink on washi paper.
+func _paper_label(text: String, px: int, col: Color) -> Label:
+	var lab := Label.new()
+	lab.text = text
+	lab.add_theme_font_override("font", UISkin.font_body)
+	lab.add_theme_font_size_override("font_size", px)
+	lab.add_theme_color_override("font_color", col)
+	lab.add_theme_constant_override("outline_size", 0)
+	lab.anchor_left = 0.0; lab.anchor_right = 1.0
+	lab.offset_left = 0; lab.offset_right = 0
+	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lab.process_mode = Node.PROCESS_MODE_ALWAYS
+	return lab
+
+
+## Slot letter → human caption for the picker line.
+func _slot_word(slot: String) -> String:
+	match slot:
+		"Y":      return "PRIMARY"
+		"X":      return "SECONDARY"
+		"A":      return "RANGED"
+		"B":      return "DASH"
+		"Charge": return "CHARGE"
+		"Ult":    return "ULTIMATE"
+		_:        return slot.to_upper()
 
 
 # ---------------------------------------------------------------------------
@@ -1421,7 +1471,7 @@ func _can_reroll() -> bool:
 
 func _do_reroll() -> void:
 	RunState.rerolls_left -= 1
-	print("[BoonOffer] Fated Reroll — %s offer rerolled (%d left)." % [
+	Log.dbg("[BoonOffer] Fated Reroll — %s offer rerolled (%d left)." % [
 		"Shino's" if _phase == 0 else "Bea's", RunState.rerolls_left])
 	for child in get_children():
 		child.queue_free()
@@ -1531,31 +1581,85 @@ func _confirm_reroll() -> void:
 		_do_reroll()
 
 
+# Run 166 — register a freshly-built card for the pointer + focus system.
+# Marks it off-limits to the UISkin walker (each card is hand-styled) and lets
+# the mouse pick it up: hovering a card focuses it, so the cursor and the
+# keyboard/gamepad selection always agree.
+func _register_card(card: Control, idx: int) -> void:
+	if card == null or not is_instance_valid(card):
+		return
+	card.set_meta("_uiskin_skip", true)
+	card.set_meta("_card_idx", idx)
+	if not card.mouse_entered.is_connected(_on_card_hovered):
+		card.mouse_entered.connect(_on_card_hovered.bind(idx))
+
+
+func _on_card_hovered(idx: int) -> void:
+	if _picked or is_instance_valid(_confirm_panel):
+		return
+	if idx >= 0 and idx < _cards.size():
+		_set_focused(idx)
+
+
+# Run 166 — focus is now carried by a gold ring + a cinnabar 忍 seal + a small
+# lift, NOT by mutating the card's own stylebox. That was the bug: once the
+# UISkin walker swapped a card's StyleBoxFlat for a texture plaque, the old
+# `as StyleBoxFlat` cast returned null and the highlight silently vanished —
+# so nothing showed which card was selected. This works for ANY card type.
 func _set_focused(idx: int) -> void:
 	_focused_idx = clamp(idx, 0, _cards.size() - 1)
-	# Use StyleBox border override — no overlay that obscures card content.
 	for i in range(_cards.size()):
-		var card: Button = _cards[i]
-		# Retrieve the card's existing normal stylebox to re-use its geometry.
-		var base_sb: StyleBoxFlat = card.get_theme_stylebox("normal") as StyleBoxFlat
-		if base_sb == null:
-			continue
-		if i == _focused_idx:
-			# Bright gold thick border — replaces normal border, no fill change.
-			var focused_sb: StyleBoxFlat = base_sb.duplicate() as StyleBoxFlat
-			focused_sb.border_color    = Color(1.0, 0.92, 0.35, 1.0)
-			focused_sb.border_width_left   = base_sb.border_width_left   + 4
-			focused_sb.border_width_right  = base_sb.border_width_right  + 4
-			focused_sb.border_width_top    = base_sb.border_width_top    + 4
-			focused_sb.border_width_bottom = base_sb.border_width_bottom + 4
-			focused_sb.shadow_color = Color(1.0, 0.92, 0.35, 0.55)
-			focused_sb.shadow_size  = 10
-			card.add_theme_stylebox_override("normal",  focused_sb)
-			card.add_theme_stylebox_override("hover",   focused_sb)
-		else:
-			# Restore original styleboxes (remove the override so base shows through).
-			card.remove_theme_stylebox_override("normal")
-			card.remove_theme_stylebox_override("hover")
+		var card: Control = _cards[i]
+		if is_instance_valid(card):
+			_apply_card_focus(card, i == _focused_idx)
+
+
+func _apply_card_focus(card: Control, on: bool) -> void:
+	# Remember the resting Y once, so repeated focus toggles don't drift.
+	if not card.has_meta("_base_y"):
+		card.set_meta("_base_y", card.position.y)
+	var base_y: float = float(card.get_meta("_base_y"))
+	card.position.y = base_y - (10.0 if on else 0.0)
+
+	# Gold glow ring — drawn BEHIND the card so it reads as a frame around it.
+	var ring: Panel = card.get_node_or_null("FocusRing") as Panel
+	if ring == null:
+		ring = Panel.new()
+		ring.name = "FocusRing"
+		ring.show_behind_parent = true
+		ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ring.process_mode = Node.PROCESS_MODE_ALWAYS
+		ring.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		ring.offset_left = -8.0
+		ring.offset_top = -16.0
+		ring.offset_right = 8.0
+		ring.offset_bottom = 8.0
+		var rsb := StyleBoxFlat.new()
+		rsb.bg_color = Color(0, 0, 0, 0)
+		rsb.border_color = GOLD_FOCUS
+		rsb.set_border_width_all(5)
+		rsb.set_corner_radius_all(6)
+		rsb.shadow_color = Color(GOLD_FOCUS.r, GOLD_FOCUS.g, GOLD_FOCUS.b, 0.55)
+		rsb.shadow_size = 12
+		ring.add_theme_stylebox_override("panel", rsb)
+		card.add_child(ring)
+		card.move_child(ring, 0)
+	ring.visible = on
+
+	# Cinnabar 忍 focus seal in the top-left corner (the mock's hanko marker).
+	var seal: TextureRect = card.get_node_or_null("FocusSeal") as TextureRect
+	if seal == null:
+		seal = TextureRect.new()
+		seal.name = "FocusSeal"
+		seal.texture = UISkin.seal_tex("nin")
+		seal.custom_minimum_size = Vector2(52, 52)
+		seal.size = Vector2(52, 52)
+		seal.stretch_mode = TextureRect.STRETCH_KEEP
+		seal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		seal.process_mode = Node.PROCESS_MODE_ALWAYS
+		seal.position = Vector2(-22, -26)
+		card.add_child(seal)
+	seal.visible = on
 
 
 # ---------------------------------------------------------------------------
@@ -1638,7 +1742,7 @@ func _pick(boon_id: String) -> void:
 	var traded_out: String = RunState.register_slot_pick(picker, boon_id)
 	if traded_out != "":
 		var old_name: String = String(RunState.BOON_POOL.get(traded_out, {}).get("name", traded_out))
-		print("[BoonOffer] %s traded out %s for %s." % [picker.capitalize(), old_name, boon_id])
+		Log.dbg("[BoonOffer] %s traded out %s for %s." % [picker.capitalize(), old_name, boon_id])
 
 	# DD boons: grant charge to the picker specifically (not global pool).
 	# Run 40 — use the rarity the boon was TAKEN at (rolled on the offer card).

@@ -184,7 +184,34 @@ func _sync_outline() -> void:
 # Run 112 — set the held charge aura: 0 = off, 1 = winding up, 2 = fully charged.
 # The aura is rendered + pulsed by _process from this level.
 func set_charge(level: int) -> void:
+	var prev: int = _charge_level
 	_charge_level = clampi(level, 0, 2)
+	# ---------------------------------------------------------------
+	# Charge haptics (Bruno's spec 2026-08-01) — "a tiny bzt when the
+	# charge is ready, so we can feel when to release".
+	# ---------------------------------------------------------------
+	# Hooked HERE because set_charge() is the ONE function both heroes drive
+	# their charge aura through (Shino.gd:1768, Bea.gd:2886 for level 2), so a
+	# single hook covers every charge attack on both ninjas — Shino's ki-beam,
+	# Bea's shuriken blast, and anything added later — with no per-move wiring.
+	#
+	# Level 2 = "ready". Only the 0/1 -> 2 transition fires, so holding at full
+	# charge ticks once rather than buzzing continuously.
+	if _charge_level == 2 and prev != 2:
+		var fx: Node = get_node_or_null("/root/FX")
+		if fx != null and fx.has_method("charge_rumble"):
+			fx.charge_rumble(_owner_hero_id(), true)
+
+
+## hero_id of the ninja this FX node belongs to ("" if it can't be resolved).
+## HeroHitFX is a child of the hero, so the parent chain is the source of truth.
+func _owner_hero_id() -> String:
+	var n: Node = get_parent()
+	while n != null:
+		if "hero_id" in n:
+			return String(n.hero_id)
+		n = n.get_parent()
+	return ""
 
 
 # Override the default (Shino-yellow) charge palette for this hero.

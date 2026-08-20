@@ -128,7 +128,7 @@ func _build_visual() -> void:
 
 	# "Press [E]" prompt — hidden until player is in range.
 	_prompt_label = Label.new()
-	_prompt_label.text = "Press [E] to collect"
+	InputGlyphs.bind_label(_prompt_label, "Press [{interact}] to collect")   # Run 158 — live device glyph
 	_prompt_label.add_theme_font_size_override("font_size", 14)
 	_prompt_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.7))
 	_prompt_label.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.0))

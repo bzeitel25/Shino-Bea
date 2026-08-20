@@ -79,6 +79,22 @@ func _fx_col(base: Color, slot: String) -> Color:
 	return mixed
 
 
+# --- Movement speed (Run 157) ----------------------------------------
+# THE CRASH FIX. Run 155 added restore_move_speed_baseline() to HeroBase, and it
+# reads/writes `move_speed` — but move_speed was declared ONLY in the children
+# (@export in Shino.gd and Bea.gd). A base class cannot reference a member that
+# exists only on its subclasses: Godot's analyzer rejects HeroBase.gd with
+# "Identifier 'move_speed' not declared in the current scope", `class_name
+# HeroBase` then never registers, and every script that extends it reports the
+# misleading "Could not resolve class 'HeroBase'" at its `extends` line.
+#
+# Migrated here as a base @export, exactly like max_hp in Batch 5: base default
+# is Shino's 220, and Bea assigns her 230 at the top of _ready (before
+# _clean_move_speed snapshots it). No scene file sets move_speed, so the script
+# defaults still govern and behavior is unchanged for both heroes.
+@export var move_speed: float = 220.0
+
+
 # --- Frost movement multiplier --------------------------------------
 func _frost_move_mult() -> float:
 	if frost_stacks <= 0:
@@ -197,6 +213,23 @@ func get_effective_max_chi() -> int:
 # -------------------------------------------------------
 func can_receive_status(id: String) -> bool:
 	var cc_ids: Array = ["bash", "frozen", "root", "stagger", "slippery", "greased"]
+	# Run 168 — NO NEW STATUS OF ANY KIND DURING AN ULT CINEMATIC.
+	#
+	# take_damage() already refuses all damage while ult_cinematic_active(), but
+	# statuses arrive through a different door — Area2D body_entered callbacks
+	# still fire on process-disabled hazards, so a lava patch or an ice field
+	# could still stick a debuff on a hero who is standing frozen inside it
+	# because the game told her not to move.
+	#
+	# For CC that was a hard brick: StatusComponent._process() pauses for heroes
+	# during a cinematic, so the status could not tick down, while the movement-
+	# lock branch it caused stopped the ult timeline from advancing. Each waited
+	# on the other forever, with both watchdogs reading the state as legitimate.
+	# Bea.gd's ult tick now breaks that specific deadlock; this closes the door
+	# it comes through, and also stops the freeze from being a free window in
+	# which to load a hero up with debuffs she cannot react to.
+	if RunState.ult_cinematic_active():
+		return false
 	# Hulk Smash: full super-armor during any charge or release state.
 	if _hero_has("hulk_smash") and id in cc_ids:
 		if _in_charge_or_release_state():
@@ -285,6 +318,40 @@ func grant_overshield_external(amount: int) -> void:
 		FX.play_sound("overshield_gain", 0.7)
 
 
+# ============================================================
+# Run 168 — FRACTIONAL CHI BANKER
+# ============================================================
+# Every Chi award used to be truncated at its call site:
+#     current_chi += int(CHI_PER_DAMAGE_DEALT * dmg)
+# int() floors, so with the old 0.5/dmg rate a 1-damage tick awarded int(0.5)
+# = 0 Chi. Every small hit in the game silently generated nothing, and the
+# shortfall was invisible because the meter still filled fast off big hits.
+#
+# Slowing the rate to 0.30 (see CHI_PER_DAMAGE_DEALT) would have made that much
+# worse — anything under 4 damage would round to zero — stacking an accidental
+# second nerf on top of the intended one and hitting fast/weak-hit builds
+# hardest, which is exactly backwards.
+#
+# So awards now come through here. The fraction is BANKED in _chi_frac_accum
+# and paid out as soon as it crosses a whole point, which makes the tuning
+# constants mean literally what they say: 0.30/dmg is 0.30/dmg at every hit
+# size, not "0.30 above 4 damage and 0 below it".
+#
+# One accumulator per hero is correct — Chi is one pool, so it does not matter
+# which source contributed the fraction.
+var _chi_frac_accum: float = 0.0
+
+func _chi_award_whole(raw: float) -> int:
+	if raw <= 0.0:
+		return 0
+	_chi_frac_accum += raw
+	if _chi_frac_accum < 1.0:
+		return 0
+	var whole: int = int(floor(_chi_frac_accum))
+	_chi_frac_accum -= float(whole)
+	return whole
+
+
 # Run 27f — Tears of Restoration (Onion passive): Chi siphon from Poison ticks.
 func gain_chi_external(amount: int) -> void:
 	if amount <= 0:
@@ -324,7 +391,7 @@ func _fire_nutshell_shockwave() -> void:
 			es.apply("bash", bash_dur)
 			hit_count += 1
 	FX.spawn_burst_particles(global_position, Color(0.95, 0.80, 0.40, 1.0), 20)
-	print("[%s] Shellburst shockwave: %d enemies bashed (%d dmg each) in %.0fpx." % [hero_id, hit_count, burst_dmg, radius])
+	Log.dbg("[%s] Shellburst shockwave: %d enemies bashed (%d dmg each) in %.0fpx." % [hero_id, hit_count, burst_dmg, radius])
 
 
 func _refresh_overshield_aura() -> void:
@@ -355,6 +422,10 @@ func _refresh_overshield_aura() -> void:
 # Coconut Shell Breaker (Run 15) — X (secondary) attacks roll to apply Vulnerable
 # (+25% dmg taken / 5s, stacks via StatusComponent's "stack" policy).
 func _try_apply_shell_breaker(target: Node) -> bool:
+	# Run 156 — picker-only. shell_breaker_chance is a GLOBAL scalar, so without
+	# this gate either ninja rolled the other's Shell Breaker on every X hit.
+	if not _hero_has("shell_breaker"):
+		return false
 	if RunState.shell_breaker_chance <= 0.0:
 		return false
 	if randf() >= RunState.shell_breaker_chance:
@@ -394,6 +465,17 @@ var _hitfx: HeroHitFX = null           # HeroHitFX overlay — created in each c
 # false in her _ready (she spawns as the AI partner). Read only after _ready.
 var player_controlled: bool = true
 
+# Run 155 (Bruno fix — Bea stuck-after-rez, "wiggle-in-place") — durable clean
+# base move_speed. TrapZone DESTRUCTIVELY writes move_speed (root → 0.0, slow →
+# ×0.45) and relies on a SceneTreeTimer (root) or a body_exited signal (slow) to
+# restore it. Neither is guaranteed: a slow trap freed on room change never emits
+# body_exited, so the ×0.45 compounds across rooms toward 0; a lost root timer
+# strands move_speed at exactly 0. Result: a living hero (normal shading, idle/
+# walk anim still playing) whose velocity = move_vec * move_speed * mult ≈ 0 —
+# she "wiggles in place" and won't follow. Each child snapshots its @export base
+# into this in _ready (before any trap can touch it); revive restores from it.
+var _clean_move_speed: float = -1.0
+
 # --- Downed / revive state (Run 13 rework — shared mirrors) ------------------
 const REVIVE_CIRCLE_RADIUS:    float = 90.0    # standing-in-circle slow revive zone
 const REVIVE_CHANNEL_RANGE:    float = 40.0    # touching/adjacent — interact channel range
@@ -411,6 +493,55 @@ var _interact_prompt:    Label = null           # "Press [E] to revive" prompt
 var _dd_hot_pct_per_sec: float = 0.0
 var _dd_hot_remaining:   float = 0.0
 var _dd_hot_accum:       float = 0.0             # fractional HP accumulator between applies
+# Run 157 — per-family DD revive buff windows (Green Vengeance / Heart Shot /
+# Vintage Surge / Banana Splits). Set in revive_from_dd, ticked in
+# _tick_dd_revive_windows, read by each hero's damage-scale path.
+var _dd_damage_window:    float = 0.0
+var _dd_damage_mult:      float = 1.0
+var _dd_crit_window:      float = 0.0
+var _dd_combo_lock_window: float = 0.0
+var _dd_dodge_window:     float = 0.0
+var _dd_dodge_chance:     float = 0.0
+
+# Damage multiplier from an active DD revive buff (1.0 when none).
+func dd_damage_mult() -> float:
+	return _dd_damage_mult if _dd_damage_window > 0.0 else 1.0
+
+# True while Heart Shot's post-revive guaranteed-crit window is open.
+func dd_crit_active() -> bool:
+	return _dd_crit_window > 0.0
+
+# True while Vintage Surge holds the combo meter at max.
+func dd_combo_locked() -> bool:
+	return _dd_combo_lock_window > 0.0
+
+# Extra dodge chance from Banana Splits' post-revive window.
+func dd_dodge_chance() -> float:
+	return _dd_dodge_chance if _dd_dodge_window > 0.0 else 0.0
+
+# Run 157 — Titan's Roar arm 1: "+50% Ult damage". Only arm 2 (+20% all damage
+# for 5s post-cast) was ever wired. Applied at the ult damage sites rather than
+# inside _scale_damage, because ult hits don't pass an attack_type — they'd be
+# mis-typed as "primary"/"heavy" and pick up the wrong crit bonuses.
+func titans_roar_ult_mult() -> float:
+	return 1.50 if _hero_has("titans_roar") else 1.0
+
+
+func _tick_dd_revive_windows(delta: float) -> void:
+	if _dd_damage_window > 0.0:
+		_dd_damage_window = max(0.0, _dd_damage_window - delta)
+	if _dd_crit_window > 0.0:
+		_dd_crit_window = max(0.0, _dd_crit_window - delta)
+	if _dd_dodge_window > 0.0:
+		_dd_dodge_window = max(0.0, _dd_dodge_window - delta)
+	if _dd_combo_lock_window > 0.0:
+		_dd_combo_lock_window = max(0.0, _dd_combo_lock_window - delta)
+		# Vintage Surge: hold the combo meter pinned at 30 while the window runs.
+		if get("combo_count") != null and int(get("combo_count")) < 30:
+			set("combo_count", 30)
+			RunState.set_combo(hero_id, 30)
+			if has_signal("combo_count_changed"):
+				emit_signal("combo_count_changed", 30)
 # Baked Apple finisher HoT (Run 27) — unified Run 154 hero-parity sweep. Identical
 # defaults were declared in both children; picker-only per Run 150b (gate via _hero_has).
 var _baked_apple_hot_remaining: float = 0.0
@@ -439,6 +570,13 @@ func _is_state_downed() -> bool:
 
 func _is_state_dead() -> bool:
 	return false   # Shino has no DEAD state; Bea overrides.
+
+# Run 158 — is this hero mid-ult-cinematic? Used by RunState.validate_ult_freeze()
+# as the watchdog's ground truth: if RunState.ult_freeze_caster names a hero who
+# is NOT actually casting, the freeze is stale and gets cleared. Both children
+# override with their own enum (Shino: ULT_CASTING, Bea: BEA_ULT_CASTING).
+func is_ult_casting() -> bool:
+	return false
 
 func _set_state_downed() -> void:
 	pass
@@ -501,6 +639,39 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 	# Belt-and-suspenders with is_invulnerable set in _enter_downed_state.
 	if _is_state_downed():
 		return
+	# ============================================================
+	# Run 168 — ULT CINEMATIC INVULNERABILITY. HARD LOCK, BOTH HEROES.
+	# ============================================================
+	# Bruno's 2P report: "my ult (as Shino) is killing player 2 (as Bea), or
+	# it's freezing Bea while enemies continue to attack her."
+	#
+	# ROOT CAUSE: the ult freeze pinned the PARTNER in place (her whole
+	# _physics_process early-returns in the freeze-block) but nothing made her
+	# UNTOUCHABLE. Bea's own ult set iframe_timer for herself; Shino's never did,
+	# and NEITHER hero ever granted i-frames to the person being frozen. So for
+	# the entire cinematic the partner was a stationary, input-less target for:
+	#
+	#   • enemy projectiles already in flight — they are scene-parented nodes,
+	#     so disabling the enemy that fired them changed nothing;
+	#   • enemies that SPAWNED mid-ult — never in the start-of-ult freeze
+	#     snapshot, so never frozen at all;
+	#   • ground hazards (lava / ice / trap zones) she was standing in and could
+	#     no longer walk out of;
+	#   • damage-over-time from StatusComponent, which ticks in its own _process
+	#     and so kept burning her while her own process loop was suspended.
+	#
+	# That last one is why it read as "the ult KILLED her": a burn stack that
+	# would normally be survivable becomes lethal when you take ~3 extra seconds
+	# of it with zero ability to heal, dodge or disengage.
+	#
+	# THE RULE NOW: while any part of an ultimate is on screen — the splash
+	# window, either hero's solo cinematic, or the duo — NEITHER ninja can be
+	# damaged by ANYTHING. Not the partner, not the caster, no source, no
+	# exceptions. This sits ABOVE every dodge/shield/reduction path on purpose:
+	# those all still ROLL, and a roll that fails still deals damage. A freeze
+	# the player cannot act during must be a hard zero, not a good average.
+	if RunState.ult_cinematic_active():
+		return
 	if is_invulnerable:
 		return   # Dash i-frames active
 	# Run 128 — Drupe Guard (Coconut Legendary): active invuln window.
@@ -509,6 +680,14 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 	# Run 130 — Ghost Pepper: while vanished, direct enemy hits can't find you
 	# (lava/poison ground hazards still connect per doc).
 	if _ghost_stealthed and source == "enemy":
+		return
+	# Run 156 — Tailwind (Banana passive) dodge arm. The card promises
+	# "+5% dodge, move & attack speed"; only the two speed arms were wired.
+	# In Greased Lightning mode the dodge is traded for lightning damage
+	# (see RunState.get_tailwind_lightning_mult), per the card's GL clause.
+	# Run 157 — Banana Splits' post-revive dodge window stacks with Tailwind's.
+	if amount > 0 and randf() < (RunState.get_tailwind_dodge_chance(hero_id) + dd_dodge_chance()):
+		FX.spawn_hit_particles(global_position, Color(0.95, 0.90, 0.35, 0.85), 5)
 		return
 	# Coconut Overshield — absorb the entire hit if a charge is held. Charge
 	# breaks → Nutshell shockwave (if taken). Damage is fully negated.
@@ -520,7 +699,10 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 	if _drupe_dur > 0.0:
 		_drupe_invuln_timer = _drupe_dur
 		FX.spawn_burst_particles(global_position, Color(0.90, 0.75, 0.40, 0.95), 16)
-	_hit_knockback_vel = (_hit_knockback_vel + knockback_vector).limit_length(400.0)
+	# Run 156 — Starch Armor (Potato passive) promises "Knockback-immune" on the
+	# card; only its -10% DR arm was ever wired.
+	if not _hero_has("starch_armor"):
+		_hit_knockback_vel = (_hit_knockback_vel + knockback_vector).limit_length(400.0)
 	# Boon-driven damage reduction (Tough Shell, etc.) + status amplification
 	# (Vulnerable stacks — Batch 0 ROT-1 gave Bea parity here).
 	var status_mult: float = 1.0
@@ -544,10 +726,25 @@ func take_damage(amount: int, knockback_vector: Vector2 = Vector2.ZERO, source: 
 	# partner (not player-controlled), clamp HP at the floor: the hit lands
 	# (knockback/chi above) but net HP loss stops here, so they never down.
 	# Floor is 0 in every other case → normal downable behavior.
+	# Run 156 — Spineback (Potato passive) reads "spike the attacker + take 50%
+	# less from that hit". The mitigation arm was never wired: the roll used to
+	# happen AFTER current_hp had already been decremented, so only the spike
+	# landed. Roll first, halve the incoming hit, then apply it.
+	var spike_dmg: int = RunState.spineback_retaliate(adjusted, hero_id)
+	if spike_dmg > 0:
+		adjusted = max(1, int(round(float(adjusted) * 0.50)))
 	var _bm_floor: int = RunState.beastmode_hp_floor_value(player_controlled, get_effective_max_hp())
 	current_hp = max(_bm_floor, current_hp - adjusted)
-	# Spineback — 30% chance: retaliatory spike at the nearest enemy only.
-	var spike_dmg: int = RunState.spineback_retaliate(adjusted, hero_id)
+	# Phase 4 — statistics. Recorded here, at the one place HP actually drops,
+	# so every damage route (melee, ranged, DoT, hazards) is covered by one line.
+	# note_death_cause overwrites on each hit, so whatever landed LAST is what
+	# the death screen reports — which is exactly the fatal blow.
+	StatsState.note_damage_taken(RunState.run_stats, adjusted)
+	StatsState.note_death_cause(RunState.run_stats, source, hero_id)
+	# Phase 6a haptics — YOUR pad buzzes when YOU get hit. Routed per-hero, so
+	# in local 2P a player only feels their own ninja taking damage rather than
+	# both pads firing on every hit anyone takes.
+	FX.hurt_rumble(hero_id)
 	if spike_dmg > 0:
 		for e in get_tree().get_nodes_in_group("enemy"):
 			if not is_instance_valid(e):
@@ -618,7 +815,11 @@ func is_downed() -> bool:
 func _enter_downed_state() -> void:
 	if _is_state_downed():
 		return   # defensive — take_damage shouldn't fire on a downed body
-	print("[%s] knocked down — waiting for revive." % hero_id)
+	Log.dbg("[%s] knocked down — waiting for revive." % hero_id)
+	# Phase 4 — a knockdown is not a run loss (the partner can revive), so it is
+	# tracked separately from defeats. Shows up on the death screen as a measure
+	# of how close the run ran to the edge.
+	StatsState.note_downed(RunState.run_stats)
 	RunState.notify_downed(hero_id)
 	_set_state_downed()
 	velocity = Vector2.ZERO
@@ -687,33 +888,124 @@ func revive_from_dd(refill_pct: float, payloads: Array) -> void:
 	if not _is_state_downed():
 		return   # defensive
 	var max_hp_eff: int = get_effective_max_hp()
-	current_hp = max(1, int(round(max_hp_eff * refill_pct)))
-	_emit_hp_signal()
-	# Accumulate HoT contributions from ALL payloads (max strength + max duration).
+	# Run 157 — payloads now carry every family's revive line, not just the Apple
+	# HoT. Take the strongest value of each field across all queued payloads.
 	var hot_pct: float = 0.0
 	var hot_dur: float = 0.0
+	var bonus_refill: float = 0.0
+	var chi_pct: float = 0.0
+	var overshields: int = 0
+	var invuln: float = 0.0
+	var dmg_win: float = 0.0
+	var dmg_mult: float = 1.0
+	var crit_win: float = 0.0
+	var combo_win: float = 0.0
+	var dodge_win: float = 0.0
+	var dodge_chance: float = 0.0
+	var drop_peels: bool = false
+	var aoe: Array = []
+	var aoe_bash: float = 0.0
 	for p in payloads:
 		var pd: Dictionary = p
-		hot_pct = max(hot_pct, float(pd.get("hot_pct_per_sec", 0.0)))
-		hot_dur = max(hot_dur, float(pd.get("hot_duration", 0.0)))
+		hot_pct      = max(hot_pct,      float(pd.get("hot_pct_per_sec", 0.0)))
+		hot_dur      = max(hot_dur,      float(pd.get("hot_duration", 0.0)))
+		bonus_refill = max(bonus_refill, float(pd.get("bonus_refill_pct", 0.0)))
+		chi_pct      = max(chi_pct,      float(pd.get("chi_refill_pct", 0.0)))
+		overshields  = max(overshields,  int(pd.get("overshields", 0)))
+		invuln       = max(invuln,       float(pd.get("invuln_secs", 0.0)))
+		crit_win     = max(crit_win,     float(pd.get("crit_window", 0.0)))
+		combo_win    = max(combo_win,    float(pd.get("combo_lock_window", 0.0)))
+		aoe_bash     = max(aoe_bash,     float(pd.get("aoe_bash", 0.0)))
+		if float(pd.get("damage_window", 0.0)) > dmg_win:
+			dmg_win  = float(pd.get("damage_window", 0.0))
+			dmg_mult = float(pd.get("damage_mult", 1.0))
+		if float(pd.get("dodge_window", 0.0)) > dodge_win:
+			dodge_win    = float(pd.get("dodge_window", 0.0))
+			dodge_chance = float(pd.get("dodge_chance", 0.0))
+		if bool(pd.get("drop_peels", false)):
+			drop_peels = true
+		if String(pd.get("aoe_status", "")) != "":
+			aoe.append(pd)
+	current_hp = max(1, int(round(max_hp_eff * min(1.0, refill_pct + bonus_refill))))
+	_emit_hp_signal()
 	_dd_hot_pct_per_sec = hot_pct
 	_dd_hot_remaining   = hot_dur
 	_dd_hot_accum       = 0.0
+	# Per-family revive buffs (ticked in _tick_dd_revive_windows).
+	_dd_damage_window   = dmg_win
+	_dd_damage_mult     = dmg_mult
+	_dd_crit_window     = crit_win
+	_dd_combo_lock_window = combo_win
+	_dd_dodge_window    = dodge_win
+	_dd_dodge_chance    = dodge_chance
+	if chi_pct > 0.0:
+		var chi_cap: int = get_effective_max_chi()
+		current_chi = min(chi_cap, current_chi + int(round(float(chi_cap) * chi_pct)))
+		emit_signal("chi_changed", current_chi, chi_cap)
+	if overshields > 0:
+		grant_overshield_external(overshields)
+		for _o in get_tree().get_nodes_in_group("bea") + get_tree().get_nodes_in_group("player"):
+			if _o != self and is_instance_valid(_o) and _o.has_method("grant_overshield_external"):
+				_o.grant_overshield_external(overshields)
+	if invuln > 0.0:
+		iframe_timer = max(iframe_timer, invuln)
+	# Arena-wide status bursts (Phoenix Pepper burn, Tide Pool soak, Death Bloom
+	# stink, Iron Husk stun). Applied once, by the first hero to process them.
+	if (not aoe.is_empty() or aoe_bash > 0.0) and not RunState.get_meta("_dd_aoe_done", false):
+		RunState.set_meta("_dd_aoe_done", true)
+		for e in get_tree().get_nodes_in_group("enemy"):
+			if not is_instance_valid(e):
+				continue
+			var es: Variant = e.get("status") if e.has_method("get") else null
+			if es == null or not es.has_method("apply"):
+				continue
+			for pd2 in aoe:
+				es.apply(String(pd2.get("aoe_status", "")), float(pd2.get("aoe_duration", 4.0)), int(pd2.get("aoe_stacks", 1)))
+			if aoe_bash > 0.0 and global_position.distance_to(e.global_position) <= 220.0:
+				es.apply("bash", aoe_bash, 1)
+		get_tree().create_timer(0.5).timeout.connect(func(): RunState.set_meta("_dd_aoe_done", false))
+	if drop_peels and has_method("_spawn_slapstick_drop"):
+		call("_spawn_slapstick_drop", global_position)
 	# Exit downed state with brief get-up i-frames.
 	_clear_revive_ui()
 	iframe_timer = REVIVE_IFRAME_ON_GET_UP
 	is_invulnerable = true
 	modulate = Color(1.0, 1.0, 1.0, 1.0)
+	restore_move_speed_baseline()   # Run 155 — guarantee she can walk after rez
 	_set_state_neutral()
 	if body_anim and body_anim.has_method("set_anim_state"):
 		body_anim.set_anim_state("idle")
 	FX.screen_shake(FX.SHAKE_HEAVY, FX.SHAKE_DUR_MED)
 	FX.spawn_burst_particles(global_position, Color(1.0, 0.55, 0.30, 1.0), 22)
 	FX.play_sound("dd_revive", 1.2)
-	print("[%s] DD team-revive — back at %d/%d HP, HoT %.1f%%/s for %.1fs (payloads=%d)." % [
+	Log.dbg("[%s] DD team-revive — back at %d/%d HP, HoT %.1f%%/s for %.1fs (payloads=%d)." % [
 		hero_id, current_hp, max_hp_eff,
 		_dd_hot_pct_per_sec * 100.0, _dd_hot_remaining, payloads.size(),
 	])
+
+
+# Run 155 (Bruno fix) — restore move_speed to the clean base when a revived hero
+# is clearly STRANDED (rooted to 0, or slow-compounded well below a single 0.45
+# slow) and wipe any lingering TrapZone root strand. A hero that went down inside
+# a root/slow trap can come back up unable to walk if the trap's restore path was
+# missed (root timer lost / slow node freed on room change without body_exited).
+#
+# GUARD: we only intervene below base*0.30. A hero revived while LEGITIMATELY
+# standing in one slow pool sits at ~0.45×base — leaving that alone lets the
+# trap's own exit-divide return her cleanly to base (resetting here would make
+# that later divide over-speed her). 0 (root) and compounded slows (≤0.20×) are
+# the broken states, and their trap tracking is already stale/gone, so there's no
+# pending exit-divide to conflict with.
+func restore_move_speed_baseline() -> void:
+	var base: float = _clean_move_speed
+	if base <= 0.0:
+		base = float(get_meta("trap_root_safe", 220.0))   # never captured — durable trap snapshot
+	if base > 0.0 and move_speed <= base * 0.30:
+		move_speed = base
+		if has_meta("trap_root_count"):
+			remove_meta("trap_root_count")
+		if has_meta("trap_root_base"):
+			remove_meta("trap_root_base")
 
 
 # Called by the standing partner when their rez bar fills 100%.
@@ -742,13 +1034,14 @@ func revive_from_partner() -> void:
 	iframe_timer = REVIVE_IFRAME_ON_GET_UP
 	is_invulnerable = true
 	modulate = Color(1.0, 1.0, 1.0, 1.0)
+	restore_move_speed_baseline()   # Run 155 — guarantee she can walk after rez
 	_set_state_neutral()
 	if body_anim and body_anim.has_method("set_anim_state"):
 		body_anim.set_anim_state("idle")
 	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_MED)
 	FX.spawn_burst_particles(global_position, Color(0.6, 1.0, 0.6, 1.0), 16)
 	FX.play_sound("partner_revive", 1.0)
-	print("[%s] Partner revive — back at %d/%d HP (%.0f%%)." % [
+	Log.dbg("[%s] Partner revive — back at %d/%d HP (%.0f%%)." % [
 		hero_id, current_hp, max_hp_eff, REVIVE_AT_HP_PCT * 100.0,
 	])
 
@@ -887,7 +1180,7 @@ func _start_channel_revive(downed: Node) -> void:
 	is_invulnerable = false
 	iframe_timer = 0.0
 	FX.play_sound("revive_channel_start", 0.9)
-	print("[%s] Channel-reviving partner..." % hero_id)
+	Log.dbg("[%s] Channel-reviving partner..." % hero_id)
 
 
 func _tick_channel_revive(delta: float) -> void:
@@ -908,7 +1201,7 @@ func _tick_channel_revive(delta: float) -> void:
 	if not player_controlled and RunState.ai_helper_tier >= 3 and dash_cd_timer <= 0.0 \
 	and not RunState.revive_recall_active:
 		if _ai_enemy_attack_imminent(RunState.AI_DASH_CANCEL_RANGE):
-			print("[%s AI T3] Dash-canceling channel — enemy attack imminent." % hero_id)
+			Log.dbg("[%s AI T3] Dash-canceling channel — enemy attack imminent." % hero_id)
 			_cancel_channel_revive()
 			_start_dash()
 			return
@@ -956,7 +1249,7 @@ func _show_interact_prompt(_downed: Node) -> void:
 	if _interact_prompt == null:
 		_interact_prompt = Label.new()
 		_interact_prompt.name = "InteractPrompt"
-		_interact_prompt.text = "Press [E] to revive"
+		InputGlyphs.bind_label(_interact_prompt, "Press [{interact}] to revive")   # Run 158
 		_interact_prompt.add_theme_font_size_override("font_size", 12)
 		_interact_prompt.modulate = Color(1.0, 1.0, 0.7, 1.0)
 		_interact_prompt.position = Vector2(-50.0, -54.0)
@@ -1014,6 +1307,11 @@ func _get_max_dash_charges() -> int:
 # Coconut Bash — chance per melee hit to apply Bash (1s stun) to the target and
 # grant the caller flat bonus damage. Target must expose a status component.
 func _try_apply_coconut_bash(target: Node) -> bool:
+	# Run 156 — picker-only. bash_on_hit_chance is a GLOBAL scalar, so without
+	# this gate either ninja rolled the other's Coconut Bash on every melee hit
+	# (and collected bash_bonus_damage for it).
+	if not _hero_has("coconut_bash"):
+		return false
 	if RunState.bash_on_hit_chance <= 0.0:
 		return false
 	if randf() >= RunState.bash_on_hit_chance:
@@ -1061,6 +1359,10 @@ func _tick_dd_hot(delta: float) -> void:
 	# downed=zero-DAMAGE lock (that lives in take_damage) — this is heal-side only.
 	if _is_state_downed():
 		return
+	# Run 157 — the per-family revive buff windows tick here too (both heroes
+	# already call _tick_dd_hot every frame). Must run BEFORE the HoT early-out:
+	# most families grant a buff window and no HoT at all.
+	_tick_dd_revive_windows(delta)
 	if _dd_hot_remaining <= 0.0 or _dd_hot_pct_per_sec <= 0.0:
 		return
 	_dd_hot_remaining -= delta

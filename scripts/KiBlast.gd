@@ -31,6 +31,19 @@ const BANANARANG_RANGE_MULT: float = 0.65   # −35% outward range
 # Run 30 — impact explosion (standard mode only; bananarang pierces instead).
 const EXPLOSION_RADIUS: float = 56.0    # Run 47 — was 80; −30% (too good vs clumps)
 const EXPLOSION_DMG_PCT: float = 0.6    # splash = 60% of the blast's damage
+# ---------------------------------------------------------------------------
+# Run 162 — INNATE ranged pushback REMOVED (Bruno 2026-08-01)
+# ---------------------------------------------------------------------------
+# Ranged A is deliberately spammy and fast, and full-strength knockback on
+# every shot perma-walled enemies away from the ninjas. Per the Run 49
+# "knockback vector LENGTH is a strength scalar" convention, a zero vector
+# means damage with no push at all. Speed and damage are untouched.
+#
+# BOON-GRANTED pushback is unaffected and still uses a real vector:
+#   * Kunai.heavy_knockback  (Stone Throw)
+#   * Seed Spit              (Watermelon A splash)
+const INNATE_KNOCKBACK: Vector2 = Vector2.ZERO
+
 const PIERCE_EXPLOSION_SCALE: float = 0.5   # Run 58 — Slugshot per-pierce burst: −50% radius & splash
 
 var direction: Vector2 = Vector2.DOWN
@@ -167,16 +180,18 @@ func _on_body_entered(body: Node) -> void:
 			return
 		_pierce_hit_set[body] = true
 		body.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
+		FX.hit_rumble("shino")
 		if body.has_method("take_damage"):
-			body.take_damage(_effective_hit_damage(body), direction)
+			body.take_damage(_effective_hit_damage(body), INNATE_KNOCKBACK)
 		_route_through_player(body, damage)
 		_explode(body, PIERCE_EXPLOSION_SCALE)
 		FX.play_sound("ki_blast_hit", 0.55)
 		return
 	# Standard shot: damage + detonate + despawn.
 	body.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
+	FX.hit_rumble("shino")
 	if body.has_method("take_damage"):
-		body.take_damage(_effective_hit_damage(body), direction)
+		body.take_damage(_effective_hit_damage(body), INNATE_KNOCKBACK)
 	_route_through_player(body, damage)
 	_explode(body)
 	_spawn_impact()
@@ -184,7 +199,10 @@ func _on_body_entered(body: Node) -> void:
 	# Only the ORIGINAL blast splits; sub-shots are flagged and skip this.
 	# Run 130 — Cluster Theory (Grape Legendary): EVERY projectile splits on
 	# impact, and first-level splits split ONE more time (depth 2 max).
-	if RunState.team_has("cluster_theory"):
+	# Run 156 — per-hero gate. KiBlast is SHINO's projectile (same rule as
+	# grape_shot/long_shot below); Kunai got this fix in Run 133 and this site
+	# was missed, so Bea's Cluster Theory was splitting Shino's blasts.
+	if RunState.shino_has("cluster_theory"):
 		if _split_depth < 2:
 			_spawn_grape_splits(global_position)
 	elif not _is_grape_split and RunState.shino_has("grape_shot"):
@@ -240,7 +258,9 @@ func _explode(direct_target: Node, power: float = 1.0) -> void:
 		if e.has_method("take_damage"):
 			var dir_to: Vector2 = (e.global_position - global_position).normalized()
 			e.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
-			e.take_damage(splash, dir_to)
+			FX.hit_rumble("shino")
+			# Run 162 — the innate detonation pushes no one either.
+			e.take_damage(splash, INNATE_KNOCKBACK)
 			_route_through_player(e, splash)
 	# Boom visuals — expanding lime-green ring + burst + tiny shake (scaled by power).
 	FX.spawn_explosion_ring(global_position, radius,
@@ -255,6 +275,7 @@ func _handle_bananarang_hit(enemy: Node) -> void:
 		return
 
 	enemy.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
+	FX.hit_rumble("shino")
 	enemy.take_damage(damage, direction)
 	_route_through_player(enemy, damage)
 

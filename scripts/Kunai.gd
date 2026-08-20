@@ -33,6 +33,9 @@ extends Area2D
 # clamp it to ≤1.0, so every existing normalized-vector caller is unchanged).
 # 0.25 = small stagger flinch; enemies keep pushing toward Bea.
 const KNOCKBACK_SCALE: float = 0.25
+## Run 162 — innate ranged pushback is OFF. Kept KNOCKBACK_SCALE above as the
+## historical value so the old feel is one edit away if it's ever wanted back.
+const INNATE_KNOCKBACK_SCALE: float = 0.0
 
 # Run 58 — Stone Throw (Potato A) makes the kunai a heavy rock: full-strength
 # knockback (scalar 1.0, the in-system max) instead of the light 0.25 flinch, so
@@ -88,6 +91,8 @@ func launch(dir: Vector2, spd: float, dmg: int) -> void:
 	speed = spd
 	damage = dmg
 	rotation = direction.angle() - PI / 2.0
+	# Combat-SFX pass: airy "shwip" on throw (impact stays kunai_hit on landing).
+	FX.play_sound("kunai_throw", 0.6)
 
 
 # Run 30b — convert this kunai into a shuriken: hide the blade ColorRects and
@@ -224,9 +229,14 @@ func _on_body_entered(body: Node) -> void:
 				FX.spawn_hit_particles(global_position, Color(0.95, 0.55, 0.15, 1.0), 6)
 		# Run 49 — scaled-down knockback vector: length acts as strength scalar.
 		# Run 58 — Stone Throw boon throws full-strength (1.0) heavy knockback.
-		var kb_scale: float = 1.0 if heavy_knockback else KNOCKBACK_SCALE
+		# Run 162 — INNATE ranged pushback REMOVED (Bruno 2026-08-01). Kunai spam
+		# is meant to be fast; even the light 0.25 flinch added up to a wall when
+		# thrown at rate. A 0 scalar = damage, no push (Run 49 length-as-strength
+		# convention). Stone Throw's heavy knockback is a BOON and still applies.
+		var kb_scale: float = 1.0 if heavy_knockback else INNATE_KNOCKBACK_SCALE
 		# Run 134 — killer attribution for the universal on-death hook (fix 5).
 		body.set_meta("last_damager", "bea")
+		FX.hit_rumble("bea")
 		body.take_damage(dmg, direction * kb_scale)
 	# Run 27f — Bea parity: route ranged-hit callbacks through Bea so her
 	# family statuses + Static Charge + on-hit procs fire (mirror of
@@ -355,6 +365,7 @@ func _handle_bananarang_hit(enemy: Node) -> void:
 	if not enemy.has_method("take_damage"):
 		return
 	enemy.set_meta("last_damager", "bea")   # Run 134 — killer attribution (fix 5)
+	FX.hit_rumble("bea")
 	enemy.take_damage(damage, direction)
 
 	# Phase-appropriate banana status.

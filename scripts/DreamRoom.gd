@@ -108,7 +108,7 @@ func _ready() -> void:
 	if _room == 1:
 		const HINT = preload("res://scripts/HintPopup.gd")
 		HINT.show_combat_hint(self, "Combat",
-			"Tap Y for combos  •  Hold Y to charge  •  X for heavy attacks  •  Q+Q swaps ninja  •  Clear the wave to unlock the exits")
+			"Tap {attack_y} for combos  •  Hold {attack_y} to charge  •  {attack_x} for heavy attacks  •  {swap2} swaps ninja  •  Clear the wave to unlock the exits")
 
 	_apply_night_overlay()
 	_apply_snow_overlay()
@@ -383,7 +383,7 @@ func _spawn_traps(biome: Dictionary) -> void:
 		add_child(z)
 		z.position = t.pos
 	if not dream_layout.trap_spots.is_empty():
-		print("[DreamRoom] %d traps placed." % dream_layout.trap_spots.size())
+		Log.dbg("[DreamRoom] %d traps placed." % dream_layout.trap_spots.size())
 	# Frostpeak cave rooms: falling stalactite traps on open floor.
 	if _biome_id == "peaks" and RunState.peak_room_type == "cave" and _room > 1:
 		_spawn_stalactite_traps()
@@ -460,7 +460,7 @@ func _spawn_stalactite_traps() -> void:
 		trap.position = wc2
 		placed.append(wc2)
 	if not placed.is_empty():
-		print("[DreamRoom] %d stalactite traps placed in cave room." % placed.size())
+		Log.dbg("[DreamRoom] %d stalactite traps placed in cave room." % placed.size())
 
 
 # 3 gate slots distributed to "read" as travel toward the star tip.
@@ -820,7 +820,7 @@ func _roll_peak_exit_types_early(slot_count: int) -> void:
 	var config: Array = _PEAK_EXIT_CONFIGS[rng.randi() % _PEAK_EXIT_CONFIGS.size()]
 	for et in config:
 		_gate_exit_types.append(String(et))
-	print("[DreamRoom] Peaks exit types (early): %s" % [_gate_exit_types])
+	Log.dbg("[DreamRoom] Peaks exit types (early): %s" % [_gate_exit_types])
 
 
 func _roll_peak_exit_types() -> void:
@@ -838,7 +838,7 @@ func _roll_peak_exit_types() -> void:
 	var config: Array = _PEAK_EXIT_CONFIGS[rng.randi() % _PEAK_EXIT_CONFIGS.size()]
 	for et in config:
 		_gate_exit_types.append(String(et))
-	print("[DreamRoom] Peaks exit types: %s" % [_gate_exit_types])
+	Log.dbg("[DreamRoom] Peaks exit types: %s" % [_gate_exit_types])
 
 
 # Override gate commit to save the chosen exit type for the next room.
@@ -872,7 +872,7 @@ func _assign_door_previews_and_open() -> void:
 		else:
 			_seal_gate(g)
 		_gates[i] = g
-	print("[DreamRoom] %d/%d doors opened: %s" % [_planned_open.size(), _gates.size(), _summarize_gate_previews()])
+	Log.dbg("[DreamRoom] %d/%d doors opened: %s" % [_planned_open.size(), _gates.size(), _summarize_gate_previews()])
 
 
 func _apply_preview_label(g: Dictionary, preview: Dictionary) -> void:
@@ -927,7 +927,7 @@ func _present_boon_offer() -> void:
 		get_tree().current_scene.add_child(pickup)
 		pickup.global_position = Vector2(0, -60)
 		pickup.coins_collected.connect(func(_amt: int): _after_boon_picked(""))
-		print("[DreamRoom] Coin room — CoinPickup spawned.")
+		Log.dbg("[DreamRoom] Coin room — CoinPickup spawned.")
 		return
 
 	# Run 150 (Bruno fix 8): juice rooms drop ONLY the juice, boss rooms drop
@@ -948,7 +948,7 @@ func _present_boon_offer() -> void:
 		get_tree().current_scene.add_child(item)
 		item.global_position = Vector2(0, -60)
 		item.boon_collected.connect(_after_boon_picked)
-		print("[DreamRoom] Item-only drop (%s) — room %d." % ["dragon_soul" if _drop_boss else "juice", _room])
+		Log.dbg("[DreamRoom] Item-only drop (%s) — room %d." % ["dragon_soul" if _drop_boss else "juice", _room])
 		return
 
 	super._present_boon_offer()
@@ -979,16 +979,16 @@ func _after_boon_picked(_boon_id: String) -> void:
 		RunState.update_sensei_lore_from_healing()
 		var cleared_count: int = RunState.biomes_cleared_count()
 		RunState.nights_completed += 1
-		print("[DreamRoom] %s boss down — biome cleansed (%d/5). +1 spark." % [_biome_id, cleared_count])
+		Log.dbg("[DreamRoom] %s boss down — biome cleansed (%d/5). +1 spark." % [_biome_id, cleared_count])
 	elif is_mini_room:
 		if cleared_label:
 			cleared_label.text = "★ MINI-BOSS DOWN ★\nChoose a door to continue!"
-		print("[DreamRoom] Mini-boss down.")
+		Log.dbg("[DreamRoom] Mini-boss down.")
 	elif is_juice_room:
 		var healed_j: int = RunState.grant_apple_juice(get_tree())
 		if cleared_label:
 			cleared_label.text = "✦ REWARD ACQUIRED ✦\n🧃 JUICE (+%d HP)\nChoose a door to continue!" % healed_j
-		print("[DreamRoom] Room %d juice drop — +%d HP." % [_room, healed_j])
+		Log.dbg("[DreamRoom] Room %d juice drop — +%d HP." % [_room, healed_j])
 	else:
 		if cleared_label:
 			cleared_label.text = "✦ REWARD ACQUIRED ✦\nChoose a door to continue!"
@@ -1002,6 +1002,11 @@ func _after_boon_picked(_boon_id: String) -> void:
 
 # Advance/clear the biome counters as the chosen exit commits.
 func _execute_transition() -> void:
+	# Phase 4 — committing to an exit means this room is behind you, which is the
+	# honest definition of "cleared". Counted here rather than on enemy-count-zero
+	# so it can't double-fire, and so rooms you walk out of still count.
+	StatsState.note_room_cleared(RunState.run_stats)
+	StatsState.note_biome(RunState.run_stats, String(RunState.current_biome))
 	if _pending_next_scene == DREAM_ROOM_PATH:
 		RunState.biome_room += 1
 	elif _pending_next_scene == DREAM_HUB_PATH:

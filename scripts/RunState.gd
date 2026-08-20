@@ -270,7 +270,7 @@ func register_slot_pick(who: String, boon_id: String) -> String:
 		return ""
 	remove_boon_from_char(who, old_id)
 	boon_levels[boon_id] = get_boon_level(boon_id) + 1
-	print("[RunState] %s slot %s traded: %s → %s (starts at L%d)" % [
+	Log.dbg("[RunState] %s slot %s traded: %s → %s (starts at L%d)" % [
 		who.capitalize(), slot, old_id, boon_id, get_boon_level(boon_id)])
 	return old_id
 
@@ -391,9 +391,15 @@ func get_fall_harvest_heal_pct_for(who: String) -> float:
 	return charge_kill_heal_pct if charge_kill_heal_pct > 0.0 else 0.01
 
 # ── Stat modifiers (read by Player.gd / enemies via getters) ─────────────────
+# ⚠ Run 156 — DEAD. Written by Orchard Bloom + saved/loaded, never read. The live
+# path is get_orchard_bloom_pct_for(who), which is per-hero. Reading this instead
+# would resurrect a cross-hero HP leak. Kept for save-format compatibility only.
 var max_hp_bonus_pct:     float = 0.0
 var apple_pie_stacks:     int   = 0
 var damage_mult:          float = 1.0   # global — only mutated by boons that truly affect both
+# ⚠ Run 156 — DEAD. Written by Tough Hide / Starch Armor / EconomyState's Sensei
+# DR, never read: get_damage_taken_mult_for(who) recomputes all three per-hero
+# from the boon set. Do not reintroduce reads — it would double-count the DR.
 var damage_taken_mult:    float = 1.0
 var move_speed_mult:      float = 1.0   # global baseline; per-char computed via get_char_move_speed_mult
 var attack_speed_mult:    float = 1.0   # global baseline; per-char computed via get_char_attack_speed_mult
@@ -407,9 +413,31 @@ var melee_lifesteal_pct:  float = 0.0   # % of melee damage dealt healed back (l
 var baked_apple_taken: bool = false
 const BAKED_APPLE_HOT_DURATION: float = 5.0
 const BAKED_APPLE_HOT_HP_PER_SEC: float = 1.0
-var crit_chance:          float = 0.0   # global crit chance (Carrot family — was Crit Eye placeholder, now drives Hawkeye/Golden Carrot/etc.)
-var crit_damage_bonus:    float = 0.0   # additive bonus on top of the 1.5× base crit (Hawkeye +25%)
-var heal_amp_mult:        float = 1.0   # multiplicative amp on ALL incoming heals (Apple Granny's Recipe — +30%)
+var crit_chance:          float = 0.0   # LEGACY global — see crit_chance_by below (Run 156)
+var crit_damage_bonus:    float = 0.0   # LEGACY global — see crit_damage_bonus_by below (Run 156)
+
+# Run 156 — PER-HERO crit accumulators. Keen Eye / Sharpened Tip / Bullseye /
+# Hawkeye used to add into the two globals above at apply time, and
+# BoonEffects.roll_crit_mult read them with no `who` filter — so one ninja's
+# Carrot picks buffed both ninjas' crit chance AND crit damage. These dicts are
+# now the live state (written in apply_boon via pending_picker, read in
+# roll_crit_mult via `who`). The globals stay declared/saved for old-save loads.
+var crit_chance_by:       Dictionary = {"shino": 0.0, "bea": 0.0}
+var crit_damage_bonus_by: Dictionary = {"shino": 0.0, "bea": 0.0}
+
+func _add_crit_for(who: String, chance: float, dmg: float) -> void:
+	var w: String = who if (who == "shino" or who == "bea") else "shino"
+	crit_chance_by[w] = min(1.0, float(crit_chance_by.get(w, 0.0)) + chance)
+	crit_damage_bonus_by[w] = float(crit_damage_bonus_by.get(w, 0.0)) + dmg
+
+func get_crit_chance_for(who: String) -> float:
+	return float(crit_chance_by.get(who, 0.0))
+
+func get_crit_damage_bonus_for(who: String) -> float:
+	return float(crit_damage_bonus_by.get(who, 0.0))
+# ⚠ Run 156 — DEAD. See BoonEffects.get_heal_amp. Granny's Recipe is live via
+# the per-hero get_heal_mult(who); this global accumulator is never read.
+var heal_amp_mult:        float = 1.0   # LEGACY (Apple Granny's Recipe — +30%)
 
 # =============================================================
 # SLOT BOON FLAGS — one per family slot (Y/X/A/B/Charge).
@@ -601,6 +629,7 @@ var melon_gelato_mode:  bool = false      # Gelato toggle (mode switch)
 var hydro_jab_taken:    bool = false      # Watermelon Y: +1 Soaked on Y hits
 var heavy_tide_taken:   bool = false      # Watermelon X: +2 Soaked on X hits
 var bubble_shot_taken:  bool = false      # Watermelon A: +2 Soaked on A hits
+var lingering_tide_taken: bool = false    # Run 162 — Watermelon passive: splashes leave puddles
 var spicy_jab_taken:    bool = false      # Pepper Y: +1 Burn on Y hits
 var searing_strike_taken: bool = false    # Pepper X: +2 Burn + 40% fire dmg on X hits
 var fire_damage_mult:      float = 1.0    # composite fire/burn damage multiplier
@@ -683,7 +712,24 @@ var dd_charges_remaining: int:
 	get: return shino_dd_charges + bea_dd_charges
 var dd_payloads: Array:
 	get: return shino_dd_payloads + bea_dd_payloads
-var family_dd_taken: bool = false  # still gates 1-DD-boon-per-char-per-run
+# ⚠ LEGACY GLOBAL — kept for save-compat only. Run 157: this was the *only* gate
+# on family_dd boons in _is_boon_eligible, so the moment EITHER ninja took a DD
+# boon the other could never be offered one again for the whole run — even though
+# DD_PER_CHAR_BOON_CAP and grant_dd_to_char are explicitly per-character. Use
+# family_dd_taken_by / has_family_dd(who) instead.
+var family_dd_taken: bool = false
+var family_dd_taken_by: Dictionary = {"shino": false, "bea": false}
+
+func has_family_dd(who: String) -> bool:
+	if who == "shino" or who == "bea":
+		return bool(family_dd_taken_by.get(who, false))
+	# Unknown/legacy picker → fall back to "either ninja has one".
+	return bool(family_dd_taken_by.get("shino", false)) or bool(family_dd_taken_by.get("bea", false))
+
+func _mark_family_dd(who: String) -> void:
+	var w: String = who if (who == "shino" or who == "bea") else "shino"
+	family_dd_taken_by[w] = true
+	family_dd_taken = true   # legacy mirror
 
 # Called by Player.gd / BeaAI.gd when a ninja enters the DOWNED state.
 func notify_downed(char_name: String) -> void:
@@ -712,28 +758,103 @@ func _consume_dd_for_char(char_name: String) -> Dictionary:
 	var refill: float = 0.50
 	var built: Array  = []
 	for entry in pool:
-		var p: String  = entry.get("payload", "")
-		var r: String  = entry.get("rarity",  "common")
-		var hot_pct: float = 0.0
-		var hot_dur: float = 0.0
-		if p == "apple_cider_mercy":
-			match r:
-				"common":    hot_pct = 0.03; hot_dur = 5.0
-				"uncommon":  hot_pct = 0.035; hot_dur = 5.0
-				"rare":      hot_pct = 0.04; hot_dur = 5.5
-				"epic":      hot_pct = 0.045; hot_dur = 5.5
-				"legendary": hot_pct = 0.05; hot_dur = 6.0
-				_:           hot_pct = 0.03; hot_dur = 5.0
-		built.append({"payload": p, "rarity": r, "hot_pct_per_sec": hot_pct, "hot_duration": hot_dur})
+		built.append(_build_dd_payload(String(entry.get("payload", "")), String(entry.get("rarity", "common"))))
 	if char_name == "shino": shino_dd_payloads.clear()
 	else:                    bea_dd_payloads.clear()
 	return {"consumed": true, "refill_pct": refill, "payloads": built}
+
+
+# Run 157 — DD revive payloads. Previously ONLY "apple_cider_mercy" produced any
+# payload data (a HoT); the other nine family DD boons granted their +1 charge and
+# then did literally nothing on revive, because revive_from_dd reads only
+# hot_pct_per_sec/hot_duration and never looked at the payload id. Every card's
+# revive line is now expressed as data here and applied in HeroBase.revive_from_dd.
+# `t` is a 0..1 rarity scalar used to interpolate the ranges in the card text.
+func _build_dd_payload(p: String, r: String) -> Dictionary:
+	var t: float = 0.0
+	match r:
+		"uncommon":  t = 0.25
+		"rare":      t = 0.50
+		"epic":      t = 0.75
+		"legendary": t = 1.0
+		_:           t = 0.0
+	var d: Dictionary = {
+		"payload": p, "rarity": r,
+		"hot_pct_per_sec": 0.0, "hot_duration": 0.0,
+		"bonus_refill_pct": 0.0,     # extra HP % on top of the shared 50%
+		"chi_refill_pct":   0.0,
+		"overshields":      0,
+		"invuln_secs":      0.0,
+		"damage_window":    0.0, "damage_mult": 1.0,
+		"crit_window":      0.0,
+		"combo_lock_window": 0.0,
+		"dodge_window":     0.0, "dodge_chance": 0.0,
+		"drop_peels":       false,
+		"aoe_status": "", "aoe_stacks": 0, "aoe_duration": 0.0,
+		"aoe_bash": 0.0,
+	}
+	match p:
+		"apple_cider_mercy":
+			# "50% HP refill + regen for 5s" — refill is the shared 50%.
+			d["hot_pct_per_sec"] = lerpf(0.03, 0.05, t)
+			d["hot_duration"]    = lerpf(5.0, 6.0, t)
+		"coconut_iron_husk":
+			# "3 overshields both + stun nearby 1.5s"
+			d["overshields"] = 3
+			d["aoe_bash"]    = 1.5
+		"broccoli_green_vengeance":
+			# "+50% damage for 5-7s"
+			d["damage_window"] = lerpf(5.0, 7.0, t)
+			d["damage_mult"]   = 1.50
+		"carrot_heart_shot":
+			# "100% crit chance for 10-20s"
+			d["crit_window"] = lerpf(10.0, 20.0, t)
+		"grape_vintage_surge":
+			# "combo locks at 30, no decay (10-20s)"
+			d["combo_lock_window"] = lerpf(10.0, 20.0, t)
+		"watermelon_tide_pool":
+			# "+30% HP, 75% Chi + Wet/Chilled burst"
+			d["bonus_refill_pct"] = 0.30
+			d["chi_refill_pct"]   = 0.75
+			d["aoe_status"]       = "chilled" if melon_gelato_mode else "wet"
+			d["aoe_stacks"]       = 3
+			d["aoe_duration"]     = 4.0
+		"pepper_phoenix_pepper", "pepper_phoenix":
+			# "3 Burn to all + 30% HP refill"
+			d["bonus_refill_pct"] = 0.30
+			d["aoe_status"]       = "burning"
+			d["aoe_stacks"]       = 3
+			d["aoe_duration"]     = 4.0
+		"potato_stone_form":
+			# "invulnerable for 5s (can act)"
+			d["invuln_secs"] = 5.0
+		"banana_banana_splits", "banana_splits":
+			# "+50% dodge 10s + drop slippery peels"
+			d["dodge_window"] = 10.0
+			d["dodge_chance"] = 0.50
+			d["drop_peels"]   = true
+		"onion_death_bloom":
+			# "stink cloud on every enemy on screen"
+			d["aoe_status"]   = "poison"
+			d["aoe_stacks"]   = 3
+			d["aoe_duration"] = 5.0
+	return d
 
 const DD_CHARGE_HARD_CAP: int = 2   # kept for any remaining legacy references
 
 # --- Run-meta counters ---
 var arenas_cleared:        int = 0
 var loops_completed:       int = 0
+
+# ---------------------------------------------------------------------------
+# Phase 4 — statistics. Logic lives in scripts/StatsState.gd (static module,
+# same pattern as DayState / EconomyState); RunState just owns the data.
+# ---------------------------------------------------------------------------
+# run_stats      — wiped by reset_run(), like every other in-run field.
+# lifetime_stats — META. Survives reset_run() exactly like dragon_souls. See
+#                  the explicit exemption comment inside reset_run().
+var run_stats: Dictionary = StatsState.new_run_stats()
+var lifetime_stats: Dictionary = StatsState.new_lifetime_stats()
 var broccoli_boons_taken:  int = 0      # for Stalk of Might stacking effect
 var apple_boons_taken:     int = 0      # for Iron Core duo (Apple+Broccoli) later
 var coconut_boons_taken:   int = 0
@@ -913,7 +1034,7 @@ func set_ai_helper_tier(t: int) -> void:
 	if t > highest_ai_tier_used_this_run:
 		highest_ai_tier_used_this_run = t
 	# Run 61b — debug print so Bruno can confirm tier changes hit RunState.
-	print("[RunState] AI Helper Tier: %d → %d (high-water: %d)" % [prev, t, highest_ai_tier_used_this_run])
+	Log.dbg("[RunState] AI Helper Tier: %d → %d (high-water: %d)" % [prev, t, highest_ai_tier_used_this_run])
 
 
 func get_ai_tier_spec(t: int = -1) -> Dictionary:
@@ -936,8 +1057,144 @@ var pending_reward: Dictionary = {}   # committed door pick; consumed by next Bo
 # cinematic runs, the other hero is fully frozen (no input / AI / attacks).
 # The frozen partner may ONLY press their ult button, which sets
 # double_ult_queued — the hook for the upcoming double-ult feature (GDD).
-var ult_freeze_caster: String = ""    # "" = none, else "shino" / "bea"
+var ult_freeze_caster: String = ""    # "" = none, else "shino" / "bea" / "duo"
 var double_ult_queued: bool = false
+# Duo-ult (combined ultimate). Set true by DuoUlt.request() once the partner
+# presses ult (with full Chi) during the first hero's ult. While active,
+# ult_freeze_caster is set to the sentinel "duo" so BOTH heroes' _physics_process
+# freeze-blocks early-return and the DuoUlt autoload owns their transforms.
+var duo_ult_active: bool = false
+
+# ============================================================
+# Run 168 — ULT SPLASH WINDOW + LOCK-IN
+# ============================================================
+# Every ultimate now opens with a splash frame (see UltSplash.gd) before its
+# attack animation plays. That splash IS the duo window, and these four flags
+# are the contract every other system reads.
+#
+#   ult_splash_active — a splash frame is on screen RIGHT NOW. This is the ONLY
+#       moment a solo ult can be converted into the duo. Both heroes' freeze-
+#       blocks gate their DuoUlt.request() call on it.
+#   ult_splash_hero   — who opened the splash ("shino" / "bea").
+#   ult_splash_joiner — who accepted the invitation ("" until someone does).
+#   ult_locked_in     — flipped TRUE the frame the splash closes, and stays true
+#       for the rest of the cinematic. THIS IS THE ANTI-HIJACK LATCH: once the
+#       attack animation has begun the ult belongs to its caster and nothing can
+#       convert it. Before Run 168 the partner could hijack an ult already
+#       mid-swing, which left the game half-transitioned — the solo coroutine
+#       bailing out while DuoUlt tweened the same two heroes — and that is where
+#       "Bea gets frozen while enemies keep hitting her" came from.
+var ult_splash_active: bool = false
+var ult_splash_hero: String = ""
+var ult_splash_joiner: String = ""
+var ult_locked_in: bool = false
+
+
+# THE single question every damage / freeze / status path asks:
+# "is any part of an ultimate happening right now?"
+#
+# Covers all three phases — the splash window, either hero's solo cinematic and
+# the duo cinematic. HeroBase.take_damage() and StatusComponent._process() both
+# hard-gate on this, which is what makes "players are invulnerable for the whole
+# ult animation" actually true, instead of true-only-for-the-caster.
+func ult_cinematic_active() -> bool:
+	return ult_splash_active or duo_ult_active or ult_freeze_caster != ""
+
+
+# Full teardown of every ult flag. Called on room change, hero death and run
+# reset so a cinematic interrupted mid-await can never hand the next room a
+# phantom freeze (heroes pinned in place) or a phantom invulnerability (nothing
+# can be hurt). Belt-and-braces alongside validate_ult_freeze() and UltFreeze's
+# watchdog — those two self-heal, this one is the hard reset.
+func reset_ult_state() -> void:
+	# ORDER MATTERS. Tear the SUBSYSTEMS down first, then clear the flags.
+	#
+	# Written the other way round (flags first) this function was self-defeating:
+	# UltSplash.force_close() deliberately sets ult_locked_in = true — that is how
+	# it slams the duo window shut on the way out — so calling it AFTER clearing
+	# the flags left the "hard reset" finishing with the anti-hijack latch still
+	# set. DuoUlt.request() reads that latch as authoritative, so the next duo
+	# attempt would be silently refused.
+	var splash: Node = get_node_or_null("/root/UltSplash")
+	if splash != null and splash.has_method("force_close"):
+		splash.call("force_close")
+	# DuoUlt.abort() is essential, not defensive: request() ARMS the duo but the
+	# cinematic is started later by UltSplash's tail. Reset in between and
+	# _cleanup() never runs, so DuoUlt.active sticks true — and because autoloads
+	# outlive reset_run(), the duo ult stays dead for the whole process.
+	var duo: Node = get_node_or_null("/root/DuoUlt")
+	if duo != null and duo.has_method("abort"):
+		duo.call("abort")
+	var freeze: Node = get_node_or_null("/root/UltFreeze")
+	if freeze != null and freeze.has_method("end"):
+		freeze.call("end")
+
+	ult_freeze_caster = ""
+	double_ult_queued = false
+	duo_ult_active = false
+	ult_splash_active = false
+	ult_splash_hero = ""
+	ult_splash_joiner = ""
+	ult_locked_in = false
+
+
+# Run 158 (Bruno fix — "Bea sits and wiggles and won't follow me") — ULT-FREEZE
+# WATCHDOG.
+#
+# THE BUG: Shino's ult lifecycle is driven by the _run_shino_ult() coroutine,
+# NOT by _tick_ult(). _start_ult() sets ult_timer = 0.0, so the _tick_ult()
+# branch that releases ult_freeze_caster is unreachable for Shino — and the
+# coroutine's own exits (normal tail, `state != ULT_CASTING` bail, duo bail)
+# only set state = IDLE. Result: after ANY Shino ult, ult_freeze_caster stayed
+# pinned at "shino" for the rest of the scene. Bea's _physics_process opens with
+#     if RunState.ult_freeze_caster == "shino": velocity = ZERO; return
+# so she'd stand exactly where the ult ended — alive, un-downed, normal shading,
+# her AnimatedSprite2D still looping its last animation ("wiggling"), refusing to
+# follow. Reproduced hardest in the tutorial's Room 4, which hands the player a
+# full Chi bar and explicitly tells them to press Ult.
+#
+# THE FIX: _run_shino_ult() now releases the freeze on every exit path (see
+# Shino.gd), AND this watchdog gives us a self-healing floor so no future ult
+# path can ever brick a hero again. Both heroes call it immediately before their
+# freeze-block; if the named caster is not actually mid-cinematic, the freeze is
+# stale and gets dropped on the spot.
+#
+# The "duo" sentinel is exempt — DuoUlt.gd owns both heroes' transforms while it
+# runs and clears the flag itself in its finish path.
+func validate_ult_freeze() -> void:
+	if ult_freeze_caster == "" or ult_freeze_caster == "duo" or duo_ult_active:
+		return
+	# Run 168 — the splash window is a LEGITIMATE freeze with no attack running
+	# yet. The caster is parked in ULT_CASTING awaiting UltSplash.play(), so the
+	# is_ult_casting() probe below would still pass — but exempting it outright
+	# means a future splash that does NOT pre-set the state can't be mistaken
+	# for a leak and torn down a frame after it opens.
+	if ult_splash_active:
+		return
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var want_bea: bool = (ult_freeze_caster == "bea")
+	var pool: Array = tree.get_nodes_in_group("bea") if want_bea else tree.get_nodes_in_group("player")
+	for n in pool:
+		if not is_instance_valid(n):
+			continue
+		# "player" holds BOTH ninjas (Bea adds herself so door triggers see her),
+		# so filter her out when we're validating Shino's freeze.
+		if not want_bea and n.is_in_group("bea"):
+			continue
+		if n.has_method("is_ult_casting") and n.is_ult_casting():
+			return   # legitimate freeze — the caster really is mid-cinematic
+	# Nobody is casting: the freeze leaked. Drop it so the partner can move.
+	Log.dbg("[RunState] Stale ult freeze from '%s' cleared (caster is no longer casting)." % ult_freeze_caster)
+	ult_freeze_caster = ""
+	double_ult_queued = false
+	# Run 168 — a leaked freeze means the cinematic died without unwinding, so the
+	# lock-in latch is stale too. Left set, it would silently refuse the duo on
+	# the NEXT ult ("I pressed it in the window and nothing happened"). UltFreeze
+	# has its own watchdog and will release the world on the following frame.
+	ult_locked_in = false
+
 
 # --- Slot ownership + replacement levels ---
 # Tracks which Y/X/A/B/Charge slot is currently owned per family (boon ID or "").
@@ -1140,9 +1397,9 @@ func _roll_offer_rarities(picked: Array, who: String = "") -> void:
 		current_offer_rarities[id] = roll_offer_rarity_for(id)
 		if is_slot_replacement_for(who, String(id)):
 			current_offer_rarities[id] = bump_rarity(String(current_offer_rarities[id]))
-			print("[RunState] Slot trade-up: %s offered at +1 rarity (%s)" % [id, current_offer_rarities[id]])
+			Log.dbg("[RunState] Slot trade-up: %s offered at +1 rarity (%s)" % [id, current_offer_rarities[id]])
 		if current_offer_rarities[id] != get_base_rarity(id):
-			print("[RunState] Offer rarity roll: %s → %s" % [id, current_offer_rarities[id]])
+			Log.dbg("[RunState] Offer rarity roll: %s → %s" % [id, current_offer_rarities[id]])
 
 # ============================================================
 # BOON_POOL — Run 16 reconciliation. Each entry:
@@ -1197,6 +1454,53 @@ const DUO_DEFS = BoonDBClass.DUO_DEFS
 # Lifecycle helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Phase 4 — canonical END-OF-RUN-BY-DEFEAT sequence
+# ---------------------------------------------------------------------------
+# Extracted verbatim from Shino._reload_arena1(), which was the only place this
+# sequence existed. It now has two callers — the death screen and the pause
+# menu's ABANDON RUN — and the order below is load-bearing:
+#
+#   1. bank_run_karma()  MUST run before reset_run() wipes boons_taken
+#      (Run 117: karma banks on defeat as well as victory)
+#   2. StatsState.end_run() freezes the run timer, and bank_run() rolls the run
+#      into lifetime records — also BEFORE reset_run() clears run_stats
+#   3. save   — persists dragon_souls, sensei upgrades, karma and lifetime stats
+#   4. reset_run() + clear_carry() — wipe in-run state for the next attempt
+#
+# Getting 1 or 2 after 3 would silently lose a run's karma or its stats, which
+# is exactly the kind of bug that is invisible until someone notices their
+# records never move.
+#
+# Does NOT change scene — the caller decides where to go, so the death screen
+# can stay on screen until the player presses a button.
+func finalize_defeat() -> void:
+	if has_method("bank_run_karma"):
+		bank_run_karma()
+	StatsState.end_run(run_stats)
+	StatsState.bank_run(run_stats, lifetime_stats, false)
+
+	# RESET BEFORE SAVE — this matches RunComplete._finalize_run() and it is not
+	# interchangeable with the other order.
+	#
+	# The pre-Phase-4 code (Shino._reload_arena1) saved first, which was survivable
+	# back when only boons were in flight. It is not survivable now: to_save_dict()
+	# includes run_stats, so saving first would persist the DEAD run's stats. On the
+	# next load run_stats.started_ms would already be non-zero, begin_run() would
+	# no-op (it is deliberately idempotent), and the next run's timer would never
+	# start. Resetting first writes a clean, run-over save.
+	#
+	# Safe because reset_run() preserves everything meta: dragon_souls, sensei_*,
+	# karma, and lifetime_stats — which bank_run() has already been credited above.
+	reset_run()
+	clear_carry()
+	clear_bea_carry()
+
+	var sm: Node = get_node_or_null("/root/SaveManager")
+	if sm and sm.has_method("save_active_slot") and int(sm.active_slot) >= 0:
+		sm.save_active_slot()
+
+
 func reset_run() -> void:
 	shino_boon_set.clear()
 	bea_boon_set.clear()
@@ -1214,6 +1518,17 @@ func reset_run() -> void:
 	# dragon_souls intentionally NOT reset here — it's meta currency (like
 	# sensei_* fields) that persists across runs. Reset it only in
 	# create_new_slot() for brand-new files.
+	#
+	# Phase 4 — SAME RULE FOR lifetime_stats. It holds every record, the total
+	# playtime and the boons-seen set that drives the codex; resetting it here
+	# would silently wipe all of it with no way to recover from the save file.
+	# run_stats DOES reset — it is per-run by definition.
+	# Fresh stats with the clock NOT yet started. Deliberately no begin_run()
+	# here: reset_run() fires at the Dojo (on defeat, on victory, on new file),
+	# and starting the timer there would count Dojo/shop/menu time as run time.
+	# NightLoadScreen._goto_dream() — the one gate every run passes through on
+	# its way out of the Dojo — is what actually starts the clock.
+	run_stats = StatsState.new_run_stats()
 	damage_mult          = 1.0
 	damage_taken_mult    = 1.0
 	move_speed_mult      = 1.0
@@ -1224,6 +1539,9 @@ func reset_run() -> void:
 	baked_apple_taken    = false   # Run 26d — Baked Apple finisher-HoT flag
 	crit_chance          = 0.0
 	crit_damage_bonus    = 0.0
+	# Run 156 — per-hero crit banks.
+	crit_chance_by       = {"shino": 0.0, "bea": 0.0}
+	crit_damage_bonus_by = {"shino": 0.0, "bea": 0.0}
 	heal_amp_mult        = 1.0
 	full_bloom_taken     = false
 	heavy_stalk_taken    = false
@@ -1271,6 +1589,9 @@ func reset_run() -> void:
 	_flanking_window      = 0.0
 	force_next_crit             = false
 	finisher_crit_chance_bonus  = 0.0
+	# Run 156 — per-hero crit tokens.
+	force_next_crit_by          = {"shino": false, "bea": false}
+	finisher_crit_bonus_by      = {"shino": 0.0, "bea": 0.0}
 	# Apple slots
 	heavy_harvest_taken   = false
 	seeded_shot_taken     = false
@@ -1323,6 +1644,7 @@ func reset_run() -> void:
 	hydro_jab_taken      = false
 	heavy_tide_taken     = false
 	bubble_shot_taken    = false
+	lingering_tide_taken = false
 	spicy_jab_taken      = false
 	searing_strike_taken    = false
 	fire_damage_mult        = 1.0
@@ -1377,6 +1699,7 @@ func reset_run() -> void:
 	bea_dd_charges   = 0;  bea_dd_payloads.clear()
 	_last_downed_char = ""
 	family_dd_taken   = false
+	family_dd_taken_by = {"shino": false, "bea": false}   # Run 157
 	arenas_cleared       = 0
 	loops_completed      = 0
 	broccoli_boons_taken = 0
@@ -1398,8 +1721,13 @@ func reset_run() -> void:
 	boons_taken.clear()
 	current_offer.clear()
 	pending_reward = {}
-	ult_freeze_caster = ""      # Run 150 — never let a stale ult freeze leak
-	double_ult_queued = false
+	# Run 150 — never let a stale ult freeze leak.
+	# Run 168 — routed through reset_ult_state() so the SPLASH flags, the on-screen
+	# splash frame and the world-freeze are torn down too. Clearing only these
+	# three used to leave a mid-splash reset with a live CanvasLayer over the new
+	# scene, every enemy still process-disabled, and ult_cinematic_active() stuck
+	# true — which would have made the whole next run un-damageable.
+	reset_ult_state()
 	owned_slots = { "Y": "", "X": "", "A": "", "B": "", "Charge": "", "Ult": "" }
 	owned_slots_by_char = {
 		"shino": { "Y": "", "X": "", "A": "", "B": "", "Charge": "", "Ult": "" },
@@ -1422,7 +1750,7 @@ func reset_run() -> void:
 	rerolls_left     = 0        # Run 46 — refilled by _apply_sensei_upgrades
 	# Apply Sensei Z permanent upgrades as run-start bonuses (DD charges, DR, etc.)
 	_apply_sensei_upgrades()
-	print("[RunState] Run reset.")
+	Log.dbg("[RunState] Run reset.")
 
 
 # ---------------------------------------------------------------------------
@@ -1473,7 +1801,10 @@ func _is_boon_eligible(id: String, b: Dictionary, who: String = "") -> bool:
 				return false
 		elif boons_taken.has(id):
 			return false
-	if family_dd_taken and b.get("family_dd", false):
+	# Run 157 — PER-CHARACTER. Was `family_dd_taken` (one global bool), which meant
+	# Shino taking any Death-Defiance boon locked Bea out of all ten for the rest
+	# of the run, contradicting DD_PER_CHAR_BOON_CAP / grant_dd_to_char.
+	if has_family_dd(who) and b.get("family_dd", false):
 		return false
 	# Prereq gating (Run 26c, Bruno's "Pepper scalers / mode switches require
 	# at least one same-family boon first" rule). Look up `prereq_family` on
@@ -1567,7 +1898,7 @@ func roll_family_offer(family_cap: String, who: String = "") -> Array:
 					continue
 				elif who == "" and boons_taken.has(id):
 					continue
-			if family_dd_taken and b.get("family_dd", false):
+			if has_family_dd(who) and b.get("family_dd", false):   # Run 157 — per-character
 				continue
 			# Legendaries still respect the 3-family prereq even on the relaxed
 			# fallback pass — they're not a "seed" entry.
@@ -1746,7 +2077,7 @@ func _maybe_inject_special(picked: Array, family_cap: String, who: String = "") 
 		return
 	# Replace the LAST picked card. Same rationale as _ensure_attack_slot_in_offer.
 	picked[picked.size() - 1] = special
-	print("[RunState] Special injected into %s room offer: %s" % [family_cap, special])
+	Log.dbg("[RunState] Special injected into %s room offer: %s" % [family_cap, special])
 
 
 # Corrupt boon injection — called after _maybe_inject_special in roll_family_offer.
@@ -1782,7 +2113,7 @@ func _maybe_inject_corrupt(picked: Array, family_cap: String, who: String = "") 
 		return
 	# Replace the last picked card.
 	picked[picked.size() - 1] = corrupt_id
-	print("[RunState] Corrupt injected into %s room offer: %s" % [family_cap, corrupt_id])
+	Log.dbg("[RunState] Corrupt injected into %s room offer: %s" % [family_cap, corrupt_id])
 
 
 func _pick_corrupt_for_family(fam_name: String) -> String:
@@ -1809,6 +2140,9 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		push_warning("[RunState] Unknown boon: %s" % boon_id)
 		return
 	boons_taken.append(boon_id)
+	# Phase 4 — records the pick order for the end-of-run recap AND marks the
+	# boon as seen for the Phase 7 codex. Single site: every boon lands here.
+	StatsState.note_boon(run_stats, lifetime_stats, boon_id)
 	var b: Dictionary = BOON_POOL[boon_id]
 	# Run 40 — rarity comes from the OFFER ROLL (current_offer_rarities), not
 	# the pool entry. Explicit override wins (Dojo dispenser, debug grants);
@@ -1819,7 +2153,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 	boon_rarities[boon_id] = rarity
 	# Rarity effect-bonus multiplier for apply-time numerics below.
 	var rmult: float = float(RARITY_EFFECT_MULT.get(rarity, 1.0))
-	print("[RunState] Boon taken: %s [%s] — %s" % [b.get("name", boon_id), rarity, b.get("desc", "")])
+	Log.dbg("[RunState] Boon taken: %s [%s] — %s" % [b.get("name", boon_id), rarity, b.get("desc", "")])
 
 	match boon_id:
 		# --- Apple ---
@@ -1855,7 +2189,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"cider_mercy":
 			# Per-character grant: BoonOffer calls grant_dd_to_char(picker, …) after apply_boon.
 			# The apply_boon call just records the pool ID so grant_dd knows what payload to use.
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		"heart_of_the_orchard":
 			heart_of_orchard_taken = true
 		# --- Coconut slot boons ---
@@ -1901,7 +2235,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 			overshield_max_by[pending_picker] = int(overshield_max_by.get(pending_picker, 0)) + 1
 		"iron_husk":
 			# Per-character grant via BoonOffer (grant_dd_to_char called after apply_boon).
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Broccoli slot boons ---
 		"brute_force":
 			brute_force_taken = true
@@ -1938,41 +2272,46 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"big_broccoli":
 			big_broccoli_taken = true
 		"green_vengeance":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "broccoli_green_vengeance", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Carrot ---
 		# --- Carrot slot boons ---
+		# Run 156 — the three type-crit boons now bank into the PICKER's
+		# accumulators. The per-type chance/damage adds themselves live in
+		# BoonEffects.roll_crit_mult (gated on char_has), so only the rarity-scaled
+		# flat portion is banked here — no double-count.
 		"keen_eye":
 			keen_eye_taken = true
-			crit_chance        = min(1.0, crit_chance + KEEN_EYE_CRIT_CHANCE * rmult)   # Run 40
-			crit_damage_bonus += KEEN_EYE_CRIT_DMG * rmult
+			_add_crit_for(pending_picker, KEEN_EYE_CRIT_CHANCE * rmult, KEEN_EYE_CRIT_DMG * rmult)
 		"sharpened_tip":
 			sharpened_tip_taken = true
-			crit_chance        = min(1.0, crit_chance + SHARPENED_TIP_CRIT_CHANCE * rmult)
-			crit_damage_bonus += SHARPENED_TIP_CRIT_DMG * rmult
+			_add_crit_for(pending_picker, SHARPENED_TIP_CRIT_CHANCE * rmult, SHARPENED_TIP_CRIT_DMG * rmult)
 		"bullseye":
 			bullseye_taken = true
-			crit_chance        = min(1.0, crit_chance + BULLSEYE_CRIT_CHANCE * rmult)
-			crit_damage_bonus += BULLSEYE_CRIT_DMG * rmult
+			_add_crit_for(pending_picker, BULLSEYE_CRIT_CHANCE * rmult, BULLSEYE_CRIT_DMG * rmult)
+		# Run 156 — RETIRED (no BOON_POOL entry; Run 131 replaced its dash-window
+		# perma-crit with Golden Carrot's dash-armed finisher). Arm kept for old
+		# saves; flanking_strike_taken is written but never read.
 		"flanking_strike":
 			flanking_strike_taken = true
 		"hawkeye":
 			hawkeye_taken = true
-			crit_damage_bonus += 0.25 * rmult   # Run 40 — rarity-scaled
+			_add_crit_for(pending_picker, 0.0, 0.25 * rmult)   # Run 156 — picker-only
 		"golden_carrot":
 			golden_carrot_taken = true
+			# Run 156 — golden_carrot_streak is a pre-Run-131 leftover: it is set
+			# and reset but never read. Run 131 replaced the streak design with the
+			# dash-armed finisher crit (_golden_carrot_armed on each hero).
 			golden_carrot_streak = 0
 		"critical_mass":
 			critical_mass_taken = true
+		# Run 156 — RETIRED (no BOON_POOL entry). Arm kept for old saves;
+		# opening_strike_taken is written but never read.
 		"opening_strike":
 			opening_strike_taken = true
 		"finishers_aim":
 			finishers_aim_taken = true
 		"heart_shot":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "carrot_heart_shot", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Grape slot boons ---
 		"cluster_strike":
 			cluster_strike_taken = true
@@ -1996,9 +2335,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"cluster_cascade":
 			cluster_cascade_taken = true
 		"vintage_surge":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "grape_vintage_surge", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Watermelon slot boons (B + Charge) ---
 		"hydro_slide":
 			hydro_slide_taken = true
@@ -2011,6 +2348,8 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 			heavy_tide_taken = true
 		"bubble_shot":
 			bubble_shot_taken = true
+		"lingering_tide":
+			lingering_tide_taken = true
 		"rising_tide":
 			rising_tide_taken = true
 		"hydration":
@@ -2022,9 +2361,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"melon_gelato":
 			melon_gelato_mode = true
 		"tide_pool":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "watermelon_tide_pool", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Pepper slot boons (A/B/Charge) ---
 		"fireball":
 			fireball_taken = true
@@ -2048,9 +2385,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"combust":
 			combust_taken = true
 		"phoenix_pepper":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "pepper_phoenix", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Potato slot boons ---
 		"spud_stomp":
 			spud_stomp_taken = true
@@ -2073,9 +2408,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"tremor_walk":
 			tremor_walk_taken = true
 		"stone_form":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "potato_stone_form", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Banana slot boons ---
 		"peel_slap":
 			peel_slap_taken = true
@@ -2107,9 +2440,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 		"greased_lightning":
 			greased_lightning_mode = true
 		"banana_splits":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "banana_splits", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Onion slot boons ---
 		"pungent_jab":
 			pungent_jab_taken = true
@@ -2134,9 +2465,7 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 			overripe_taken = true
 			poison_max_stacks_bonus += int(round(2.0 * rmult))   # Run 40 — +2/+3/+3/+4 by rarity
 		"death_bloom":
-			dd_charges_remaining = min(DD_CHARGE_HARD_CAP, dd_charges_remaining + 1)
-			dd_payloads.append({"payload": "onion_death_bloom", "rarity": rarity})
-			family_dd_taken = true
+			_mark_family_dd(pending_picker)   # Run 157 — per-character DD gate
 		# --- Legendaries (Run 19) ---
 		"juicebox_of_youth":
 			juicebox_of_youth_taken = true
@@ -2150,16 +2479,24 @@ func apply_boon(boon_id: String, rarity_override: String = "") -> void:
 			overshield_max_by[pending_picker] = max(int(overshield_max_by.get(pending_picker, 0)), 2)
 		"hulk_smash":
 			hulk_smash_taken = true
-		# --- Run 23 Legendaries ---
+		# --- Run 23/24 Legendaries — ALL SIX RETIRED (Run 128 "6 wired, 6 retired") ---
+		# Run 156 note: none of these six has a BOON_POOL entry any more, so they
+		# can never be offered, granted or Dojo-dispensed — these arms and their
+		# read sites (Shino/Bea/BoonEffects) are permanently unreachable. Arms are
+		# kept, apple_hour-style, so old saves that still list the id load cleanly.
+		# If any of them is ever revived, re-add a BOON_POOL entry FIRST, then make
+		# it picker-only — eagle_eye's crit arm below is written the pre-Run-156
+		# global way and would leak to both ninjas.
 		"tidal_tsunami":
 			tidal_tsunami_taken = true
 		"inferno_crown":
 			inferno_crown_taken = true
 		"eagle_eye":
 			eagle_eye_taken = true
-			# Mirror Hawkeye's pattern: +25% crit chance + +25% crit damage bonus.
-			crit_chance        = min(1.0, crit_chance + 0.25)
-			crit_damage_bonus += 0.25
+			# Run 156 — was mutating the global crit_chance/crit_damage_bonus.
+			# Routed through the per-hero bank so a revival can't reintroduce the
+			# Carrot crit leak. (Unreachable today — see the note above.)
+			_add_crit_for(pending_picker, 0.25, 0.25)
 		"sniper_focus":
 			# Run 24 — 2nd Carrot Legendary. Passive streak tracking in roll_crit_mult.
 			sniper_focus_taken = true
@@ -2341,7 +2678,7 @@ func apply_dragon_fruit_to_boon(boon_id: String, levels_up: int = 1) -> void:
 		return
 	var current: int = int(boon_levels.get(boon_id, 1))
 	boon_levels[boon_id] = current + levels_up
-	print("[RunState] Dragon Fruit (+%d): %s → level %d (now +%.0f%% effect, %s rarity)" % [
+	Log.dbg("[RunState] Dragon Fruit (+%d): %s → level %d (now +%.0f%% effect, %s rarity)" % [
 		levels_up, boon_id, current + levels_up, (get_boon_level_mult(boon_id) - 1.0) * 100.0,
 		get_boon_rarity(boon_id)])
 
@@ -2401,6 +2738,40 @@ var force_next_crit: bool = false
 # finisher_crit_chance_bonus — additive crit chance added on combo finisher hits.
 # Finisher's Aim Charge boon applies +50% here; Player sets it before roll on finishers.
 var finisher_crit_chance_bonus: float = 0.0   # applied per-roll, not persistent
+
+# Run 156 — PER-HERO crit-token mirrors. The two globals above are a single slot
+# shared by both ninjas, so in 2P whichever hero swung next consumed the token the
+# OTHER hero had just armed (Golden Carrot / Opening Strike / Master Stroke /
+# Finisher's Aim / Grape+Banana all raced). These dicts are the real state now;
+# the globals are kept as a legacy fallback so any un-migrated caller still works.
+var force_next_crit_by: Dictionary = {"shino": false, "bea": false}
+var finisher_crit_bonus_by: Dictionary = {"shino": 0.0, "bea": 0.0}
+
+# Arm a guaranteed crit for ONE hero's next damage roll.
+func arm_force_crit(who: String) -> void:
+	force_next_crit_by[who] = true
+
+# Add additive crit chance to ONE hero's next damage roll (consumed on roll).
+func add_finisher_crit_bonus(who: String, amount: float) -> void:
+	finisher_crit_bonus_by[who] = float(finisher_crit_bonus_by.get(who, 0.0)) + amount
+
+# Set (not add) one hero's pending finisher crit bonus — Finisher's Aim semantics.
+func set_finisher_crit_bonus(who: String, amount: float) -> void:
+	finisher_crit_bonus_by[who] = amount
+
+# Consume-and-clear helpers used by roll_crit_mult. Each folds in the legacy
+# global so a stray `RunState.force_next_crit = true` still lands somewhere.
+func consume_force_crit(who: String) -> bool:
+	var hit: bool = bool(force_next_crit_by.get(who, false)) or force_next_crit
+	force_next_crit_by[who] = false
+	force_next_crit = false
+	return hit
+
+func consume_finisher_crit_bonus(who: String) -> float:
+	var amt: float = float(finisher_crit_bonus_by.get(who, 0.0)) + finisher_crit_chance_bonus
+	finisher_crit_bonus_by[who] = 0.0
+	finisher_crit_chance_bonus = 0.0
+	return amt
 
 # attack_type: "primary", "heavy", "ranged", or "" (unspecified = no per-type bonus).
 # Keen Eye (+15%/+10% on primary), Sharpened Tip (+25%/+20% on heavy),
@@ -2559,7 +2930,7 @@ func get_apple_pie_max_hp_pct() -> float:
 # so their HP bar can heal/widen by the pickup amount immediately.
 func grant_apple_pie() -> void:
 	apple_pie_stacks += 1
-	print("[RunState] Apple Pie consumed — stacks now %d (+%.0f%% max HP)" % [
+	Log.dbg("[RunState] Apple Pie consumed — stacks now %d (+%.0f%% max HP)" % [
 		apple_pie_stacks, get_apple_pie_max_hp_pct() * 100.0,
 	])
 
@@ -2628,6 +2999,14 @@ var full_ending_beaten: bool = false   # persistent — set on Shadow Sensei Z v
 
 func town_visual_tier() -> int:
 	return DayState.town_visual_tier()   # P2-B4a: body → scripts/DayState.gd
+
+# Run 167 — the Carnival gate + the Dragon Fruit troupe's art tier.
+# Bodies live in scripts/DayState.gd (facade rule: RunState only delegates).
+func carnival_open() -> bool:
+	return DayState.carnival_open()
+
+func dragonfruit_tier() -> int:
+	return DayState.dragonfruit_tier()
 
 # Transient (NOT saved) — day-world routing + run guard.
 var _karma_banked_this_run: bool = false
@@ -2868,37 +3247,17 @@ func grant_apple_juice(tree: SceneTree) -> int:
 # ---------------------------------------------------------------------------
 # Death-Defiance consumption (Run 13 team-wide trigger).
 # ---------------------------------------------------------------------------
+# ⚠ DEPRECATED (Run 157) — no callers. The live path is resolve_team_down() →
+# _char_has_dd / _consume_dd_for_char, which is per-character. This function
+# decremented `dd_charges_remaining`, a GETTER-ONLY computed property
+# (shino_dd_charges + bea_dd_charges), so the write could never take effect —
+# had anything called it, DD would have been consumed infinitely. Routed to the
+# per-character path so a stray legacy call behaves correctly instead.
 func consume_dd_charge() -> Dictionary:
 	if dd_charges_remaining <= 0:
 		return {"consumed": false, "payloads": []}
-	dd_charges_remaining -= 1
-	var refill: float = 0.50
-	var built: Array = []
-	for entry in dd_payloads:
-		var ed: Dictionary = entry
-		var p: String = ed.get("payload", "")
-		var r: String = ed.get("rarity",  "common")
-		var hot_pct: float = 0.0
-		var hot_dur: float = 0.0
-		if p == "apple_cider_mercy":
-			match r:
-				"common":    hot_pct = 0.03; hot_dur = 5.0
-				"uncommon":  hot_pct = 0.035; hot_dur = 5.0
-				"rare":      hot_pct = 0.04; hot_dur = 5.5
-				"epic":      hot_pct = 0.045; hot_dur = 5.5
-				"legendary": hot_pct = 0.05; hot_dur = 6.0
-				_:           hot_pct = 0.03; hot_dur = 5.0
-		built.append({
-			"payload":         p,
-			"rarity":          r,
-			"hot_pct_per_sec": hot_pct,
-			"hot_duration":    hot_dur,
-		})
-	return {
-		"consumed":   true,
-		"refill_pct": refill,
-		"payloads":   built,
-	}
+	var _who: String = "shino" if shino_dd_charges > 0 else "bea"
+	return _consume_dd_for_char(_who)
 
 
 func has_dd_charge() -> bool:
@@ -2929,7 +3288,7 @@ func resolve_team_down(team: Array) -> void:
 			return
 		var refill_pct: float = float(result.get("refill_pct", 0.50))
 		var payloads: Array   = result.get("payloads", [])
-		print("[RunState] DD consumed from %s — reviving %d ninja(s) at %.0f%% HP." % [
+		Log.dbg("[RunState] DD consumed from %s — reviving %d ninja(s) at %.0f%% HP." % [
 			dd_source, team.size(), refill_pct * 100.0])
 		for n in team:
 			if is_instance_valid(n) and n.has_method("revive_from_dd"):
@@ -3105,7 +3464,7 @@ func take_duo(duo_id: String) -> void:
 		push_warning("[RunState] Unknown duo: %s" % duo_id)
 		return
 	duos_taken[duo_id] = true
-	print("[RunState] DUO taken: %s — %s" % [
+	Log.dbg("[RunState] DUO taken: %s — %s" % [
 		DUO_DEFS[duo_id].get("name", duo_id), DUO_DEFS[duo_id].get("desc", "")])
 	current_offer.clear()
 
@@ -3277,8 +3636,8 @@ func get_hulk_smash_charge_mult() -> float:
 func get_hulk_smash_windup_mult() -> float:
 	return BoonEffects.get_hulk_smash_windup_mult()
 # Big Broccoli — +50% AoE radius / hitbox size on all charge attacks.
-func get_big_broccoli_aoe_mult() -> float:
-	return BoonEffects.get_big_broccoli_aoe_mult()
+func get_big_broccoli_aoe_mult(who: String = "") -> float:
+	return BoonEffects.get_big_broccoli_aoe_mult(who)
 
 # Run 131 — Fury Release (Broccoli Charge): +40% charge hitbox/AoE size for the
 # owning hero (per-ninja). The +60% charge damage is applied in each hero's
@@ -3344,28 +3703,40 @@ func tide_master_refund(base_cost: int, who: String = "") -> int:
 # Cluster Mastery — each combo point = 1% chance to double-strike (cap 30%).
 # Cluster Cascade — Y finisher primes X for +25% 4s; X finisher primes Y for +50% 4s.
 # ---------------------------------------------------------------------------
-var _cluster_cascade_y_primed: float = 0.0   # timer; X-next gets +25%
-var _cluster_cascade_x_primed: float = 0.0   # timer; Y-next gets +50%
+var _cluster_cascade_y_primed: float = 0.0   # LEGACY global (see *_by below)
+var _cluster_cascade_x_primed: float = 0.0   # LEGACY global (see *_by below)
+# Run 157 — PER-HERO prime timers. The two globals above were shared, so Shino's
+# Y finisher primed BEA's next X (and vice versa) even though Cluster Cascade is
+# a personal combo-flow boon.
+var _cascade_y_primed_by: Dictionary = {"shino": 0.0, "bea": 0.0}
+var _cascade_x_primed_by: Dictionary = {"shino": 0.0, "bea": 0.0}
 
-func get_cluster_mastery_double_chance(combo: int) -> float:
-	return BoonEffects.get_cluster_mastery_double_chance(combo)
+func get_cascade_y_primed(who: String) -> float:
+	return float(_cascade_y_primed_by.get(who, 0.0))
+
+func get_cascade_x_primed(who: String) -> float:
+	return float(_cascade_x_primed_by.get(who, 0.0))
+
+func get_cluster_mastery_double_chance(combo: int, who: String = "") -> float:
+	return BoonEffects.get_cluster_mastery_double_chance(combo, who)
 
 func tick_cluster_cascade(delta: float) -> void:
-	if _cluster_cascade_y_primed > 0.0:
-		_cluster_cascade_y_primed = max(0.0, _cluster_cascade_y_primed - delta)
-	if _cluster_cascade_x_primed > 0.0:
-		_cluster_cascade_x_primed = max(0.0, _cluster_cascade_x_primed - delta)
+	for w in ["shino", "bea"]:
+		if float(_cascade_y_primed_by.get(w, 0.0)) > 0.0:
+			_cascade_y_primed_by[w] = max(0.0, float(_cascade_y_primed_by[w]) - delta)
+		if float(_cascade_x_primed_by.get(w, 0.0)) > 0.0:
+			_cascade_x_primed_by[w] = max(0.0, float(_cascade_x_primed_by[w]) - delta)
 
-func notify_cluster_cascade_finisher(is_y_finisher: bool) -> void:
-	if not cluster_cascade_taken:
+func notify_cluster_cascade_finisher(is_y_finisher: bool, who: String = "shino") -> void:
+	if not char_has("cluster_cascade", who):
 		return
 	if is_y_finisher:
-		_cluster_cascade_y_primed = 4.0   # prime X for 4s
+		_cascade_y_primed_by[who] = 4.0   # prime X for 4s
 	else:
-		_cluster_cascade_x_primed = 4.0   # prime Y for 4s
+		_cascade_x_primed_by[who] = 4.0   # prime Y for 4s
 
-func get_cluster_cascade_mult(is_y_finisher: bool) -> float:
-	return BoonEffects.get_cluster_cascade_mult(is_y_finisher)
+func get_cluster_cascade_mult(is_y_finisher: bool, who: String = "shino") -> float:
+	return BoonEffects.get_cluster_cascade_mult(is_y_finisher, who)
 
 # ---------------------------------------------------------------------------
 # Overripe — Poison max stacks: base 5 → 7 (each boon level adds 1, cap 10).
@@ -3383,12 +3754,38 @@ func get_overripe_poison_max() -> int:
 # frees. Covers: Juicebox kill credit, Wave Crash / Brain Freeze, Summer's/
 # Winter's End death detonation, Rotten Core, Plague Layer Zonion raising.
 # ============================================================
+# ---------------------------------------------------------------------------
+# Run 162 — Lingering Tide (Watermelon passive) shared puddle
+# ---------------------------------------------------------------------------
+# Single definition of "a splash left a pool", so every splash source spawns an
+# identical one. Routed through a hero because _spawn_status_zone lives on the
+# hero scripts (same pattern Bea uses to borrow Shino's zone spawner).
+#
+# NOTE: Hydro Slide and Summer's End are deliberately NOT routed here — they
+# already spawn their own pool as part of their card identity, and adding this
+# on top would double-spawn.
+func _spawn_splash_puddle(pos: Vector2) -> void:
+	var tree: SceneTree = get_tree()
+	if tree == null:
+		return
+	var chilled: bool = melon_gelato_mode
+	var col: Color = Color(0.65, 0.92, 1.0, 0.45) if chilled else Color(0.45, 0.80, 0.95, 0.45)
+	for p in tree.get_nodes_in_group("player"):
+		if p.has_method("_spawn_status_zone"):
+			p._spawn_status_zone(pos, 56.0, 3.0, "chilled", 1, col)
+			return
+
+
 func process_enemy_death_boons(enemy: Node2D) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
 	var tree: SceneTree = get_tree()
 	if tree == null:
 		return
+	# Phase 4 — kill counter. This hook is already the SINGLE source of enemy
+	# death detection for every enemy type (Run 134), so one line here counts
+	# every kill in the game with no per-enemy wiring.
+	StatsState.note_kill(run_stats, enemy.is_in_group("boss"))
 	var pos: Vector2 = enemy.global_position
 	var st: Variant = enemy.get("status") if enemy.has_method("get") else null
 	if st == null and enemy.has_node("StatusComponent"):
@@ -3434,6 +3831,10 @@ func process_enemy_death_boons(enemy: Node2D) -> void:
 					e.take_damage(4, (e.global_position - pos).normalized() * 30.0)
 				if e.has_node("StatusComponent"):
 					e.get_node("StatusComponent").apply(wc_id, 4.0, 1)
+		# Run 162 — Lingering Tide: this death-burst is a splash, so it pools.
+		# Killer-owned like the burst itself (Run 139 per-picker rule).
+		if _killer_has(killer, "lingering_tide"):
+			_spawn_splash_puddle(pos)
 	# 4. Summer's / Winter's End — smaller death detonation (stack only). Killer-owned.
 	if (was_wet or was_frost) and _killer_has(killer, "summers_end"):
 		var se_id: String = "chilled" if was_frost else "wet"
@@ -3501,6 +3902,17 @@ func rotten_core_on_enemy_death(was_poisoned: bool) -> bool:
 # ---------------------------------------------------------------------------
 func spineback_retaliate(incoming_dmg: int, who: String = "shino") -> int:
 	return BoonEffects.spineback_retaliate(incoming_dmg, who)
+
+# Run 156 — Tailwind dodge / GL-lightning arms (facade).
+func get_tailwind_dodge_chance(who: String = "shino") -> float:
+	return BoonEffects.get_tailwind_dodge_chance(who)
+
+func get_tailwind_lightning_mult(who: String = "shino") -> float:
+	return BoonEffects.get_tailwind_lightning_mult(who)
+
+# Run 156 — Rock Smash / Spud Stomp earth-damage arms (facade).
+func get_earth_slot_dmg_mult(who: String, attack_type: String) -> float:
+	return BoonEffects.get_earth_slot_dmg_mult(who, attack_type)
 
 
 # Run 134 — Drawn Bow idle thresholds (single source of truth, read by both
@@ -3900,6 +4312,9 @@ func to_save_dict() -> Dictionary:
 		"melee_lifesteal_pct":  melee_lifesteal_pct,
 		"crit_chance":          crit_chance,
 		"crit_damage_bonus":    crit_damage_bonus,
+		# Run 156 — per-hero crit banks (the two above are legacy).
+		"crit_chance_by":       crit_chance_by,
+		"crit_damage_bonus_by": crit_damage_bonus_by,
 		"heal_amp_mult":        heal_amp_mult,
 		"dragon_souls":        dragon_souls,
 		# Run 117 — Daytime world: karma & family healing (persistent meta)
@@ -3966,6 +4381,9 @@ func to_save_dict() -> Dictionary:
 		"loops_completed":   loops_completed,
 		"ai_helper_tier":    ai_helper_tier,
 		"highest_ai_tier_used_this_run": highest_ai_tier_used_this_run,
+		# Phase 4 — statistics (run_stats is in-run, lifetime_stats is meta).
+		"run_stats":         run_stats.duplicate(true),
+		"lifetime_stats":    lifetime_stats.duplicate(true),
 		# Carry state
 		"carry_hp":   carry_hp,
 		"carry_chi":  carry_chi,
@@ -3983,6 +4401,7 @@ func to_save_dict() -> Dictionary:
 		"shino_dd_payloads": shino_dd_payloads.duplicate(true),
 		"bea_dd_payloads":   bea_dd_payloads.duplicate(true),
 		"family_dd_taken":   family_dd_taken,
+		"family_dd_taken_by": family_dd_taken_by,   # Run 157 — per-character DD gate
 		# Apple
 		"baked_apple_taken":       baked_apple_taken,
 		"full_bloom_taken":        full_bloom_taken,
@@ -4061,6 +4480,7 @@ func to_save_dict() -> Dictionary:
 		"hydro_jab_taken":         hydro_jab_taken,
 		"heavy_tide_taken":        heavy_tide_taken,
 		"bubble_shot_taken":       bubble_shot_taken,
+		"lingering_tide_taken":    lingering_tide_taken,
 		"hydro_slide_taken":       hydro_slide_taken,
 		"flood_charge_taken":      flood_charge_taken,
 		"tidal_tsunami_taken":     tidal_tsunami_taken,
@@ -4143,6 +4563,16 @@ func load_from_dict(d: Dictionary) -> void:
 	if d.has("melee_lifesteal_pct"):  melee_lifesteal_pct  = float(d["melee_lifesteal_pct"])
 	if d.has("crit_chance"):          crit_chance          = float(d["crit_chance"])
 	if d.has("crit_damage_bonus"):    crit_damage_bonus    = float(d["crit_damage_bonus"])
+	# Run 156 — per-hero crit banks. Old saves have only the globals; fall back to
+	# crediting them to Shino so a mid-run load doesn't silently zero the build.
+	if d.has("crit_chance_by"):
+		crit_chance_by = d["crit_chance_by"].duplicate()
+	elif crit_chance > 0.0:
+		crit_chance_by = {"shino": crit_chance, "bea": 0.0}
+	if d.has("crit_damage_bonus_by"):
+		crit_damage_bonus_by = d["crit_damage_bonus_by"].duplicate()
+	elif crit_damage_bonus > 0.0:
+		crit_damage_bonus_by = {"shino": crit_damage_bonus, "bea": 0.0}
 	if d.has("heal_amp_mult"):        heal_amp_mult        = float(d["heal_amp_mult"])
 	if d.has("dragon_souls"):        dragon_souls        = int(d["dragon_souls"])
 	# Run 117 — Daytime world: karma & family healing (values re-int'd at
@@ -4240,6 +4670,12 @@ func load_from_dict(d: Dictionary) -> void:
 	if d.has("carry_player_controlled_char"): carry_player_controlled_char = int(d["carry_player_controlled_char"])
 	if d.has("resume_scene_path"): resume_scene_path = String(d["resume_scene_path"])
 	# Tutorial & story progression
+	# Phase 4 — stats. normalise() backfills any key the save predates, so a
+	# file written before Phase 4 loads with fresh defaults instead of erroring.
+	run_stats = StatsState.normalise(
+		d.get("run_stats", {}), StatsState.RUN_DEFAULTS)
+	lifetime_stats = StatsState.normalise(
+		d.get("lifetime_stats", {}), StatsState.LIFETIME_DEFAULTS)
 	if d.has("tutorial_completed"):  tutorial_completed  = bool(d["tutorial_completed"])
 	if d.has("sensei_lore_tier"):    sensei_lore_tier    = int(d["sensei_lore_tier"])
 	if d.has("nights_completed"):    nights_completed    = int(d["nights_completed"])
@@ -4249,6 +4685,13 @@ func load_from_dict(d: Dictionary) -> void:
 	if d.has("shino_dd_payloads"): shino_dd_payloads = d["shino_dd_payloads"].duplicate(true)
 	if d.has("bea_dd_payloads"):   bea_dd_payloads   = d["bea_dd_payloads"].duplicate(true)
 	if d.has("family_dd_taken"):   family_dd_taken   = bool(d["family_dd_taken"])
+	# Run 157 — per-character DD gate. Old saves only have the global bool; derive
+	# the per-hero flags from who actually holds a DD charge so a loaded run keeps
+	# its gating instead of re-opening a DD pick the hero already used.
+	if d.has("family_dd_taken_by"):
+		family_dd_taken_by = d["family_dd_taken_by"].duplicate()
+	elif family_dd_taken:
+		family_dd_taken_by = {"shino": shino_dd_charges > 0, "bea": bea_dd_charges > 0}
 	# Bool flags
 	baked_apple_taken       = d.get("baked_apple_taken",       false)
 	full_bloom_taken        = d.get("full_bloom_taken",        false)
@@ -4328,6 +4771,7 @@ func load_from_dict(d: Dictionary) -> void:
 	hydro_jab_taken         = d.get("hydro_jab_taken",         false)
 	heavy_tide_taken        = d.get("heavy_tide_taken",        false)
 	bubble_shot_taken       = d.get("bubble_shot_taken",       false)
+	lingering_tide_taken    = d.get("lingering_tide_taken",    false)
 	hydro_slide_taken       = d.get("hydro_slide_taken",       false)
 	flood_charge_taken      = d.get("flood_charge_taken",      false)
 	tidal_tsunami_taken     = d.get("tidal_tsunami_taken",     false)

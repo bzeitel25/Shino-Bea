@@ -160,6 +160,12 @@ const C_FOAM:  Color = Color(0.91, 0.96, 0.98)
 # ground but below the heroes (z 0) — barrier cells are unwalkable anyway.
 const GROUND_Z: int = -34
 const PROP_Z: int = -12
+# Palm layering: the trunk's very BASE keeps PROP_Z (heroes + rocks may cover it),
+# but everything above it (trunk + fronds) is lifted to PALM_CANOPY_Z so the canopy
+# always draws OVER rock barriers (rocks sit at absolute z 0). Kept below the cliff
+# wall frame (BARRIER_OVERHANG_Z = 3) so distant coast palms stay behind the border.
+const PALM_BASE_FRAC: float = 0.22   # bottom slice of the art treated as "the base"
+const PALM_CANOPY_Z: int = 1
 # Barrier rocks/logs draw ABOVE the hero body sprites so a ninja walking into a
 # barrier is occluded by it (reads as standing BEHIND the rock) instead of floating
 # on top of its tip; a DASH lifts the hero over it. This is the GLOBAL rule — the z
@@ -883,7 +889,8 @@ static func _try_prop(root: Node2D, placed: Array, name: String, base: Vector2,
 	# baked shadow is stripped during keying.
 	var sink: int = int(WORLD_CELL * (0.30 if is_palm else 0.08))
 	# Jitter disabled so the recorded foot-circle matches the drawn position exactly.
-	_add_prop_tex(root, tex, base, height_cells, rng, sink, is_palm, false, false, overhead)
+	# Palms split their canopy above rocks (palm_split); rocks draw as one sprite.
+	_add_prop_tex(root, tex, base, height_cells, rng, sink, is_palm, false, false, overhead, is_palm)
 	placed.append({ "c": base, "r": r })
 	return true
 
@@ -1319,7 +1326,8 @@ static func _cave_tex(orient: String) -> ImageTexture:
 
 static func _add_prop_tex(root: Node2D, tex: ImageTexture, base: Vector2, height_cells: float,
 		rng: RandomNumberGenerator, sink: int, with_shadow: bool = true,
-		anchor_center: bool = false, jitter: bool = true, overhead: bool = false) -> void:
+		anchor_center: bool = false, jitter: bool = true, overhead: bool = false,
+		palm_split: bool = false) -> void:
 	var th: float = float(tex.get_height())
 	var tw: float = float(tex.get_width())
 	var target_h: float = WORLD_CELL * height_cells
@@ -1328,6 +1336,46 @@ static func _add_prop_tex(root: Node2D, tex: ImageTexture, base: Vector2, height
 	var draw_w: float = tw * sc
 	var jx: int = rng.randi_range(-10, 10) if (jitter and not anchor_center) else 0
 	var feet: Vector2 = base + Vector2(float(jx), float(sink))   # contact point
+
+	# Palms: draw as TWO region sprites so the canopy clears the rocks. The bottom
+	# slice (the trunk's very base) keeps PROP_Z and may be occluded by a rock/hero;
+	# everything above it is lifted to PALM_CANOPY_Z (absolute) so the fronds and
+	# trunk always draw OVER rock barriers, per the design rule.
+	if palm_split:
+		var top_y: float = feet.y - draw_h
+		if with_shadow:
+			var psh := Sprite2D.new()
+			var pstex: ImageTexture = _shadow_texture()
+			psh.texture = pstex
+			psh.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+			var psh_w: float = draw_w * 0.62
+			var psh_h: float = maxf(6.0, psh_w * 0.42)
+			psh.scale = Vector2(psh_w / float(pstex.get_width()), psh_h / float(pstex.get_height()))
+			psh.position = feet
+			root.add_child(psh)
+		var bf: float = PALM_BASE_FRAC
+		# Base band — bottom slice of the art, left at PROP_Z (root's z band).
+		var base_spr := Sprite2D.new()
+		base_spr.texture = tex
+		base_spr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		base_spr.region_enabled = true
+		base_spr.region_rect = Rect2(0.0, th * (1.0 - bf), tw, th * bf)
+		base_spr.scale = Vector2(sc, sc)
+		base_spr.position = Vector2(feet.x, feet.y - draw_h * bf * 0.5)
+		root.add_child(base_spr)
+		# Canopy + trunk — everything above the base, lifted over the rocks.
+		var can_spr := Sprite2D.new()
+		can_spr.texture = tex
+		can_spr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		can_spr.region_enabled = true
+		can_spr.region_rect = Rect2(0.0, 0.0, tw, th * (1.0 - bf))
+		can_spr.scale = Vector2(sc, sc)
+		can_spr.position = Vector2(feet.x, top_y + draw_h * (1.0 - bf) * 0.5)
+		can_spr.z_as_relative = false
+		can_spr.z_index = PALM_CANOPY_Z
+		root.add_child(can_spr)
+		return
+
 	var ysort: bool = overhead and root.y_sort_enabled
 
 	if ysort:

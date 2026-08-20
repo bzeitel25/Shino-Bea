@@ -60,6 +60,8 @@ static func _spawn(host: Node, title_text: String, body_text: String) -> void:
 
 
 func _build(title_text: String, body_text: String) -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	layer = 40
 
 	_panel = PanelContainer.new()
@@ -79,6 +81,10 @@ func _build(title_text: String, body_text: String) -> void:
 	_panel.offset_left = -260.0
 	_panel.offset_right = 260.0
 	_panel.offset_top = 14.0
+	# Run 158 — explicit grow directions: the panel expands downward (and evenly
+	# sideways) as its contents grow, so long copy can never clip out of frame.
+	_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_panel.grow_vertical = Control.GROW_DIRECTION_END
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_panel)
 
@@ -86,26 +92,32 @@ func _build(title_text: String, body_text: String) -> void:
 	vbox.add_theme_constant_override("separation", 4)
 	_panel.add_child(vbox)
 
+	# Run 158 — every row autowraps now (the title and footer used to be able to
+	# run past the panel edge on long copy), and all three go through
+	# InputGlyphs.bind_label so {tokens} render for the live device and re-render
+	# the moment the player switches between keyboard and pad.
 	var title := Label.new()
-	title.text = title_text
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.add_theme_color_override("font_color", COLOR_GOLD)
 	title.add_theme_font_size_override("font_size", 17)
+	InputGlyphs.bind_label(title, title_text)
 	vbox.add_child(title)
 
 	var body := Label.new()
-	body.text = body_text
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_theme_color_override("font_color", COLOR_BODY)
 	body.add_theme_font_size_override("font_size", 14)
+	InputGlyphs.bind_label(body, body_text)
 	vbox.add_child(body)
 
 	var footer := Label.new()
-	footer.text = "Start / − to close   •   toggle tips in Settings"
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	footer.add_theme_color_override("font_color", COLOR_DIM)
 	footer.add_theme_font_size_override("font_size", 11)
+	InputGlyphs.bind_label(footer, "{close_tip} to close   •   toggle tips in Settings")
 	vbox.add_child(footer)
 
 	# Gentle entrance — tween + auto-hide timer deferred to _ready

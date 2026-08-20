@@ -17,6 +17,8 @@ const ART_PATH: String = "res://Assets/Loading Screens/Cake Dragon Fortress.png"
 const HOLD_SECONDS: float = 4.0
 
 func _ready() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	RunState.current_biome = "cake"
 	RunState.biome_room = 1
 	# Cake Fortress theme (Assets/Music/CakeDragon_Climb/) — also carries into the

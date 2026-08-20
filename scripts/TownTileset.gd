@@ -686,7 +686,31 @@ const TIER_EXTRAS: Dictionary = {
 }
 
 
-static func build_props(parent: Node2D, half: Vector2, tier: int, keepouts: Array) -> void:
+# Run 163 — props that EMIT LIGHT. Keyed by placement name; the halo is a real
+# GlowLight (scripts/GlowLight.gd), never baked into the prop PNG.
+#   [colour, radius(px), energy, breath, height fraction of the prop to sit at]
+# Daytime town, so energies are deliberately gentle — these read as a warm pool
+# at the lamp's foot, not as night lighting. Crank `energy` here for dusk.
+# static var (not const): a const initialiser referencing another script's
+# constants is fragile across Godot versions — this is resolved at first use.
+static var LIGHT_EMITTERS: Dictionary = {
+	"lamp_a":                [GlowLight.LAMP_TOWN, 150.0, 0.50, 0.09, 0.86],
+	"lamp_b":                [GlowLight.LAMP_TOWN, 150.0, 0.50, 0.09, 0.86],
+	"dojo:lantern_stone_a":  [GlowLight.WARM_STONE, 110.0, 0.42, 0.10, 0.70],
+	"dojo:lantern_stone_b":  [GlowLight.WARM_STONE, 110.0, 0.42, 0.10, 0.70],
+}
+
+
+# Run 167 — `night` multiplies every lamp/lantern GlowLight. The daylight
+# energies below are deliberately gentle (a warm pool at the lamp's foot); at
+# night the SAME lamps are the only thing holding the square up, so they burn
+# properly. Geometry and colour are untouched — only energy/reach change, per
+# the Run 163 lock (the glow lives in the light, never in the sprite).
+const NIGHT_LIGHT_GAIN: float = 2.7
+const NIGHT_LIGHT_REACH: float = 1.25
+
+static func build_props(parent: Node2D, half: Vector2, tier: int, keepouts: Array,
+		night: bool = false) -> void:
 	# Foot-anchored wraps inside a y-sorted container (Y-sort depth rule:
 	# heroes + interior props share z=0 and sort by foot Y). TownSquare's
 	# _ready() enables y_sort_enabled on itself, so this container inherits
@@ -747,6 +771,15 @@ static func build_props(parent: Node2D, half: Vector2, tier: int, keepouts: Arra
 		spr.position = Vector2(0, -wh * 0.5)
 		wrap.add_child(spr)
 		host.add_child(wrap)
+
+		# Run 163 — lamps/lanterns get a real light instead of a painted glow.
+		# Attached to `host` (world scale), never to `spr` (which is scaled).
+		if LIGHT_EMITTERS.has(name):
+			var em: Array = LIGHT_EMITTERS[name]
+			var radius: float = float(em[1]) * (NIGHT_LIGHT_REACH if night else 1.0)
+			var energy: float = float(em[2]) * (NIGHT_LIGHT_GAIN if night else 1.0)
+			GlowLight.attach(host, pos + Vector2(0.0, -wh * float(em[4])),
+				em[0], radius, energy, float(em[3]))
 
 		if col_r > 0.0:
 			var body := StaticBody2D.new()

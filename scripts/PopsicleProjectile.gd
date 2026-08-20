@@ -29,6 +29,13 @@ var _cs: CollisionShape2D = null
 
 
 func _ready() -> void:
+	# Run 168 — join "enemy_attack" so UltFreeze can stop this projectile with the
+	# rest of the world during an ultimate. This node is parented to the SCENE,
+	# not to the enemy that fired it, so disabling the shooter never stopped it —
+	# a shot already in flight used to sail on and hit the partner who was pinned
+	# in place by the ult freeze. That was one of the four holes behind Bruno's
+	# "enemies continue to attack her" report. See UltFreeze.gd.
+	add_to_group("enemy_attack")
 	collision_layer = 16
 	collision_mask  = 2            # Player only — the lob clears walls
 	_cs = CollisionShape2D.new()

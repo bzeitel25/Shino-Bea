@@ -32,9 +32,13 @@ const COLOR_PANEL:        Color = Color(0.08, 0.07, 0.10, 0.96)
 
 const SETTINGS_SCENE: String = "res://scenes/SettingsMenu.tscn"
 
-@onready var start_btn:    Button     = $CenterStack/StartButton
-@onready var controls_btn: Button     = $CenterStack/ControlsButton
-@onready var quit_btn:     Button     = $CenterStack/QuitButton
+# Run 164 — the buttons now hang inside the scroll, so the paths are deeper
+# than the old flat CenterStack. Node NAMES are deliberately unchanged.
+const STACK_PATH: String = "ScrollFrame/ScrollBody/Content/CenterStack"
+
+@onready var start_btn:    Button     = $ScrollFrame/ScrollBody/Content/CenterStack/StartButton
+@onready var controls_btn: Button     = $ScrollFrame/ScrollBody/Content/CenterStack/ControlsButton
+@onready var quit_btn:     Button     = $ScrollFrame/ScrollBody/Content/CenterStack/QuitButton
 @onready var overlay:      Control    = $ControlsOverlay
 @onready var overlay_close_btn: Button = $ControlsOverlay/Panel/CloseButton
 
@@ -78,11 +82,15 @@ func _ready() -> void:
 			rs.shino_device = -1
 			rs.bea_device = -1
 
+	# Run 164 — paint the scroll before anything else so the first frame the
+	# player sees is already skinned (UISkin is an autoload; it is always up).
+	UISkin.skin_main_menu(self)
+
 	# Create the SETTINGS button and slot it between CONTROLS and QUIT.
 	settings_btn = Button.new()
 	settings_btn.text = "SETTINGS"
-	settings_btn.custom_minimum_size = Vector2(340, 56)
-	var stack := $CenterStack
+	settings_btn.custom_minimum_size = Vector2(0, 62)
+	var stack: Control = get_node(STACK_PATH)
 	stack.add_child(settings_btn)
 	stack.move_child(settings_btn, quit_btn.get_index())   # place just above QUIT
 
@@ -158,7 +166,10 @@ func _process(_delta: float) -> void:
 	if _splash_hold:
 		return
 	# ── Polling-based stick nav (immune to wobble) ───────────────
-	if not is_instance_valid(_settings_menu) and not overlay.visible:
+	# ConfirmPopup.is_open() added in the Phase 1-3 sweep: this poll would
+	# otherwise keep cycling focus behind an open dialog.
+	if not is_instance_valid(_settings_menu) and not overlay.visible \
+			and not ConfirmPopup.is_open():
 		if _nav_cooldown_t > 0.0:
 			_nav_cooldown_t -= _delta
 		var want: int = 0
@@ -182,17 +193,9 @@ func _process(_delta: float) -> void:
 					if _nav_cooldown_t <= 0.0:
 						_cycle_focus(_nav_held_dir); _nav_cooldown_t = NAV_COOLDOWN
 
-	# Update the focused button's font color to bright gold; others stay dim.
-	for b in [start_btn, controls_btn, settings_btn, quit_btn]:
-		if b == null:
-			continue
-		if b.has_focus():
-			b.add_theme_color_override("font_color", COLOR_GOLD_BRIGHT)
-			b.add_theme_color_override("font_focus_color", COLOR_GOLD_BRIGHT)
-			b.add_theme_color_override("font_hover_color", COLOR_GOLD_BRIGHT)
-		else:
-			b.add_theme_color_override("font_color", COLOR_GOLD_BORDER)
-			b.add_theme_color_override("font_hover_color", COLOR_GOLD_BRIGHT)
+	# Run 164 — focus feedback is now the plaque swap + the sliding hanko seal
+	# (see UISkin.skin_button). The old per-frame font-colour override fought
+	# the theme, so it is gone; nothing to do here each frame.
 
 
 func _input(event: InputEvent) -> void:
@@ -206,6 +209,11 @@ func _input(event: InputEvent) -> void:
 	# Settings panel handles its own input (incl. Esc to close) — don't let the
 	# title menu cycle focus behind it.
 	if is_instance_valid(_settings_menu):
+		return
+	# Same for a confirmation dialog. This menu reads raw joypad events rather
+	# than relying on focus (see the Run 75 note below), so without this guard
+	# gamepad A would activate the button BEHIND the quit prompt.
+	if ConfirmPopup.is_open():
 		return
 
 	# --------------------------------------------------------------------
@@ -297,7 +305,7 @@ func _on_start_pressed() -> void:
 	if _starting:
 		return
 	_starting = true
-	print("[MainMenu] START pressed — loading Save Select.")
+	Log.dbg("[MainMenu] START pressed — loading Save Select.")
 	if get_node_or_null("/root/FX") and FX.has_method("fade_to_black"):
 		FX.fade_to_black(0.30, 0.05, 1.0, Callable(self, "_do_start_scene_change"))
 	else:
@@ -337,7 +345,15 @@ func _on_settings_menu_closed() -> void:
 
 
 func _on_quit_pressed() -> void:
-	print("[MainMenu] QUIT pressed — closing game.")
+	# Phase 3c — confirm first. Skipped automatically when the player has
+	# turned Settings > Safety Confirmations off.
+	ConfirmPopup.request(self, "QUIT GAME?",
+		"Your progress is saved at the Dojo and at each gate.",
+		"QUIT", Callable(self, "_do_quit"), true)
+
+
+func _do_quit() -> void:
+	Log.dbg("[MainMenu] QUIT confirmed — closing game.")
 	get_tree().quit()
 
 
@@ -347,12 +363,25 @@ func _on_quit_pressed() -> void:
 
 func _open_overlay() -> void:
 	overlay.visible = true
+	# The 忍ノ道 / 影ヲ継グ者 inscriptions hang from the screen root (added by
+	# UISkin.skin_main_menu), so they render ON TOP of the controls sheet and
+	# print red kanji straight over the key-binding text. Hide them while the
+	# overlay is up; restore on close.
+	_set_inscriptions_visible(false)
 	overlay_close_btn.grab_focus()
 
 
 func _close_overlay() -> void:
 	overlay.visible = false
+	_set_inscriptions_visible(true)
 	controls_btn.grab_focus()
+
+
+func _set_inscriptions_visible(v: bool) -> void:
+	for n in ["InscriptionLeft", "InscriptionRight"]:
+		var lab: Control = get_node_or_null(n) as Control
+		if lab != null:
+			lab.visible = v
 
 
 func _on_overlay_close_pressed() -> void:
@@ -364,6 +393,15 @@ func _on_overlay_close_pressed() -> void:
 # ---------------------------------------------------------------------------
 
 func _style_button(btn: Button) -> void:
+	# Run 164 — one source of truth. UISkin gives the button the ema-plaque
+	# 9-slice in all four states, the DotGothic16 face, ink-outlined text and a
+	# cinnabar 忍 seal that snaps in beside it on focus.
+	UISkin.skin_button(btn, "nin" if btn != overlay_close_btn else "")
+
+
+# Superseded by UISkin.skin_button — kept only as a reference for what the
+# pre-Run-164 menu looked like. Nothing calls it.
+func _style_button_legacy(btn: Button) -> void:
 	# Gold-bordered button with dark fill. Hover + focus push the border brighter.
 	var sb_normal := StyleBoxFlat.new()
 	sb_normal.bg_color = Color(0.10, 0.09, 0.13, 0.94)

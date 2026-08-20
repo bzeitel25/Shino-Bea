@@ -265,6 +265,22 @@ func _on_exit(body: Node) -> void:
 		_slowed.erase(id)
 
 
+# Run 155 (Bruno fix — Bea "wiggle-in-place" softlock) — restore any body still
+# standing in this "slow" pool when the trap is torn down. Godot does NOT emit
+# body_exited when an Area2D is freed, so a slow trap that vanishes on a room
+# change would leave the hero's move_speed permanently multiplied by 0.45 — and
+# it COMPOUNDS every room she ends a fight in a pool, dragging move_speed toward
+# 0 until she can no longer walk (looks alive, animates, never translates). Root
+# traps self-heal via their SceneTreeTimer (survives the node free); the revive
+# path also hard-resets move_speed. This closes the slow-compounding leak.
+func _exit_tree() -> void:
+	for id in _slowed.keys():
+		var body: Object = instance_from_id(id)
+		if body != null and is_instance_valid(body) and ("move_speed" in body):
+			body.move_speed = float(body.move_speed) / float(_slowed[id])
+	_slowed.clear()
+
+
 func _off_cooldown(id: int) -> bool:
 	return Time.get_ticks_msec() >= int(_cd_until.get(id, 0))
 

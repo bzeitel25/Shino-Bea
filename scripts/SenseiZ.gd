@@ -528,8 +528,8 @@ const SENSEI_GREETINGS: Array = [
 
 	# ── Praise + constructive advice (Praise > Correct > Praise) ──
 	"Bea, your naginata sweeps are getting fierce. Work on aiming your Meteor Crash landing — hold the direction while charging X. The precision will come.",
-	"Shino, your combos are tighter every run. Try mixing in a charged Y dash to close distance before your opener — you'll catch them off guard.",
-	"Good instincts throwing kunai at range, Bea. Next step: hold A to charge a Shuriken Flurry for groups. Spread damage is your friend.",
+	"Shino, your combos are tighter every run. Try mixing in a charged {attack_y} dash to close distance before your opener — you'll catch them off guard.",
+	"Good instincts throwing kunai at range, Bea. Next step: hold {attack_a} to charge a Shuriken Flurry for groups. Spread damage is your friend.",
 	"Your dodge timing has improved, {hero}. Now try dashing THROUGH attacks instead of away — you're invulnerable during the dash, use it.",
 	"I see you both using your Ultimates well. Remember — your Chi builds faster when you vary your attacks. Don't just spam one button.",
 	"Shino, your crane kick is devastating. Try catching enemies in a group first, then sweep — one big crane kick clears a room.",
@@ -613,6 +613,9 @@ func _show_train_choice() -> void:
 	var nav := preload("res://scripts/MenuFocusNav.gd").new()
 	_greeting_choice_layer.add_child(nav)
 	nav.buttons = [yes_btn, no_btn]
+	# B / Esc backs out — same as choosing "Not right now".
+	nav.on_cancel = func():
+		_close_greeting_choice()
 
 	yes_btn.pressed.connect(func():
 		_close_greeting_choice()
@@ -719,7 +722,7 @@ func _open_shop() -> void:
 	vbox.add_child(sep2)
 
 	var footer := Label.new()
-	footer.text = "↑↓ / W,S  Navigate    Enter / A  Purchase    E / Esc  Close"
+	InputGlyphs.bind_label(footer, "{menu_nav}  Navigate     {accept}  Purchase     {cancel}  Close")   # Run 158
 	footer.add_theme_color_override("font_color", COLOR_GOLD_DIM)
 	footer.add_theme_font_size_override("font_size", 14)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -736,7 +739,7 @@ func _close_shop() -> void:
 		_overlay = null
 	_card_nodes.clear()
 	if _player_near and interact_prompt:
-		interact_prompt.text = "[E]  Train with Sensei Z"
+		InputGlyphs.update_binding(interact_prompt, "[{interact}]  Train with Sensei Z")   # Run 158
 		interact_prompt.visible = true
 
 
@@ -945,7 +948,7 @@ func _try_purchase(idx: int) -> void:
 	RunState.dragon_souls -= next_cost
 	RunState.set(field, current_val + upg["amount"])
 
-	print("[SenseiZ] Purchased '%s' — %s now %.3f  (%d sparks remaining)" % [
+	Log.dbg("[SenseiZ] Purchased '%s' — %s now %.3f  (%d sparks remaining)" % [
 		upg["name"], field, RunState.get(field), RunState.dragon_souls
 	])
 

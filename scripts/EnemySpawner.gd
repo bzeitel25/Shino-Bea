@@ -111,7 +111,7 @@ func _spawn_wave() -> void:
 	if ter_n > 0:
 		suffix += " + %d tertiary" % ter_n
 	suffix += ")"
-	print("[EnemySpawner] Wave started — %d enemies spawned.%s" % [total_count, suffix])
+	Log.dbg("[EnemySpawner] Wave started — %d enemies spawned.%s" % [total_count, suffix])
 
 
 # ---------------------------------------------------------------------------
@@ -122,5 +122,5 @@ func _check_wave_cleared() -> void:
 	var living_enemies: Array = get_tree().get_nodes_in_group("enemy")
 	if living_enemies.is_empty():
 		_wave_active = false
-		print("[EnemySpawner] Wave cleared!")
+		Log.dbg("[EnemySpawner] Wave cleared!")
 		emit_signal("wave_cleared")

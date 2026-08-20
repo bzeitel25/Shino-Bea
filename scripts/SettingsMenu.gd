@@ -28,6 +28,8 @@ var _scroll: ScrollContainer = null
 
 
 func _ready() -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	process_mode = Node.PROCESS_MODE_ALWAYS   # usable while the game is paused
 	_settings = get_node_or_null("/root/Settings")
 
@@ -100,21 +102,38 @@ func _ready() -> void:
 		"set_pause_music_with_game")
 
 	vbox.add_child(_section_label("VIDEO"))
-	_add_check(vbox, "Fullscreen",
-		_settings.fullscreen if _settings else false,
-		"set_fullscreen")
+	_build_display_rows(vbox)
 	_add_slider(vbox, "Brightness", _settings.brightness if _settings else 1.0,
 		0.5, 1.5, 0.05, "set_brightness", false)
 
 	vbox.add_child(_section_label("FEEL"))
-	_add_check(vbox, "Screen Shake", _settings.shake_enabled if _settings else true,
+	_add_check(vbox, "Screen Shake (1 Player)", _settings.shake_enabled if _settings else true,
 		"set_shake_enabled")
+	# Phase 6a — separate toggle, default OFF. Two ninjas shaking one shared
+	# camera on every hit is too much; rumble is unaffected and stays per-player.
+	_add_check(vbox, "Screen Shake (2 Player)", _settings.shake_enabled_2p if _settings else false,
+		"set_shake_enabled_2p")
 	_add_slider(vbox, "Shake Intensity", _settings.shake_intensity if _settings else 1.0,
 		0.0, 1.5, 0.05, "set_shake_intensity", false)
+	# Phase 6a — photosensitivity. Separate from shake on purpose: motion
+	# sensitivity and flash sensitivity are different needs.
+	_add_slider(vbox, "Flash Intensity", _settings.flash_intensity if _settings else 1.0,
+		0.0, 1.0, 0.05, "set_flash_intensity", true)
+	_add_check(vbox, "Controller Rumble", _settings.rumble_enabled if _settings else true,
+		"set_rumble_enabled")
+	_add_slider(vbox, "Rumble Strength", _settings.rumble_strength if _settings else 1.0,
+		0.0, 1.5, 0.05, "set_rumble_strength", false)
 
 	vbox.add_child(_section_label("HUD"))
 	_add_check(vbox, "Show Nameplates", _settings.nameplates_enabled if _settings else true,
 		"set_nameplates_enabled")
+	# Phase 6a — "Crits only" keeps the numbers a crit build cares about while
+	# silencing chip-damage spam.
+	_dmgnum_btn = _add_cycle_row(vbox, "Damage Numbers", func() -> void:
+		if _settings and _settings.has_method("cycle_damage_number_mode"):
+			_settings.cycle_damage_number_mode()
+			_refresh_feel_rows()
+	)
 
 	vbox.add_child(_section_label("GAMEPLAY"))
 	_add_check(vbox, "Safety Confirmations", _settings.safety_confirmations if _settings else true,
@@ -142,6 +161,9 @@ func _ready() -> void:
 	_back_btn.pressed.connect(_on_back)
 	vbox.add_child(_back_btn)
 	_register_focus(_back_btn)
+
+	# Phase 6a — seed the non-VIDEO cycle rows with their current values.
+	_refresh_feel_rows()
 
 	# Focus the first control for keyboard / gamepad users.
 	if _first_control:
@@ -180,8 +202,11 @@ func _register_focus(ctrl: Control) -> void:
 func _section_label(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.add_theme_color_override("font_color", COLOR_GOLD_DIM)
-	l.add_theme_font_size_override("font_size", 15)
+	# Cinnabar section heads — the old dim gold washed out to muddy olive once the
+	# panel became washi paper. Deep red reads clearly and matches the CONTROLS
+	# sheet's heading. (UISkin.skin_tree sinks it to a paper-safe cinnabar.)
+	l.add_theme_color_override("font_color", UISkin.SEAL)
+	l.add_theme_font_size_override("font_size", 17)
 	return l
 
 
@@ -228,7 +253,139 @@ func _add_slider(parent: Node, label_text: String, value: float,
 		_first_control = slider
 
 
-func _add_check(parent: Node, label_text: String, value: bool, setter: String) -> void:
+# ---------------------------------------------------------------------------
+# Run 160 — VIDEO block: fullscreen toggle + windowed-size cycler.
+# ---------------------------------------------------------------------------
+# The toggle always mirrors the REAL window state (Settings.is_fullscreen()),
+# never a stale saved flag — so flipping with F11 / Alt+Enter while this panel
+# is open updates the checkbox live instead of desyncing it.
+var _fs_check: CheckButton = null
+var _winsize_btn: Button = null
+var _vsync_btn: Button = null    # Phase 3f
+var _fps_btn: Button = null      # Phase 3f
+var _dmgnum_btn: Button = null   # Phase 6a
+
+
+## Refreshes the cycle-row labels outside the VIDEO block (which has its own
+## refresher driven by the display_changed signal).
+func _refresh_feel_rows() -> void:
+	if is_instance_valid(_dmgnum_btn) and _settings \
+			and _settings.has_method("get_damage_number_label"):
+		_dmgnum_btn.text = String(_settings.get_damage_number_label())
+
+
+func _build_display_rows(parent: Node) -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
+	# Pull the live window state in before we draw anything.
+	if _settings and _settings.has_method("sync_fullscreen_from_display"):
+		_settings.sync_fullscreen_from_display()
+
+	_fs_check = _add_check(parent, "Fullscreen",
+		_settings.fullscreen if _settings else false,
+		"set_fullscreen")
+
+	_winsize_btn = _add_cycle_row(parent, "Window Size", func() -> void:
+		if _settings and _settings.has_method("cycle_windowed_size"):
+			_settings.cycle_windowed_size()
+	)
+
+	# Phase 3f — frame pacing. Both reuse the same cycle-row widget as Window
+	# Size and are refreshed by _refresh_display_rows().
+	_vsync_btn = _add_cycle_row(parent, "V-Sync", func() -> void:
+		if _settings and _settings.has_method("cycle_vsync_mode"):
+			_settings.cycle_vsync_mode()
+			_refresh_display_rows()
+	)
+
+	_fps_btn = _add_cycle_row(parent, "Frame Rate Limit", func() -> void:
+		if _settings and _settings.has_method("cycle_max_fps"):
+			_settings.cycle_max_fps()
+			_refresh_display_rows()
+	)
+
+	var hint := Label.new()
+	hint.text = "F11 or Alt+Enter toggles fullscreen anytime. The picture is locked to 16:9 and rendered at your monitor's native resolution — never stretched."
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.custom_minimum_size = Vector2(540, 0)
+	# Dark ink instead of dim gold, and a hair larger — this is instructional
+	# text, so it needs to be readable on the washi rather than a faint whisper.
+	hint.add_theme_color_override("font_color", COLOR_TEXT)
+	hint.add_theme_font_size_override("font_size", 14)
+	parent.add_child(hint)
+
+	if _settings and _settings.has_signal("display_changed"):
+		_settings.connect("display_changed", Callable(self, "_on_display_changed"))
+	_refresh_display_rows()
+
+
+## A label + button row whose button text is driven by _refresh_display_rows().
+func _add_cycle_row(parent: Node, label_text: String, on_press: Callable) -> Button:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.custom_minimum_size = Vector2(540, 34)
+
+	var name_lbl := Label.new()
+	name_lbl.text = label_text
+	name_lbl.custom_minimum_size = Vector2(180, 0)
+	name_lbl.add_theme_color_override("font_color", COLOR_TEXT)
+	name_lbl.add_theme_font_size_override("font_size", 17)
+	row.add_child(name_lbl)
+
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(200, 32)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_style_button(btn)
+	btn.add_theme_font_size_override("font_size", 16)
+	btn.pressed.connect(on_press)
+	row.add_child(btn)
+
+	parent.add_child(row)
+	_register_focus(btn)
+	if _first_control == null:
+		_first_control = btn
+	return btn
+
+
+func _on_display_changed(_is_fullscreen: bool) -> void:
+	_refresh_display_rows()
+
+
+func _refresh_display_rows() -> void:
+	var fs: bool = false
+	var size_txt: String = "1280 x 720"
+	if _settings:
+		if _settings.has_method("is_fullscreen"):
+			fs = bool(_settings.is_fullscreen())
+		elif "fullscreen" in _settings:
+			fs = bool(_settings.fullscreen)
+		if "windowed_size" in _settings:
+			var ws: Vector2i = _settings.windowed_size
+			size_txt = "%d x %d" % [ws.x, ws.y]
+
+	if is_instance_valid(_fs_check) and _fs_check.button_pressed != fs:
+		_fs_check.set_pressed_no_signal(fs)
+
+	if is_instance_valid(_winsize_btn):
+		# Windowed size is meaningless while fullscreen — grey it out rather
+		# than letting the player set a value that does nothing.
+		_winsize_btn.disabled = fs
+		_winsize_btn.text = "(fullscreen)" if fs else size_txt
+		_winsize_btn.add_theme_color_override("font_color",
+			COLOR_GOLD_DIM if fs else COLOR_GOLD)
+
+	# Phase 3f — labels come from Settings so the menu can never drift out of
+	# sync with the values actually applied to the engine.
+	if is_instance_valid(_vsync_btn) and _settings \
+			and _settings.has_method("get_vsync_label"):
+		_vsync_btn.text = String(_settings.get_vsync_label())
+
+	if is_instance_valid(_fps_btn) and _settings \
+			and _settings.has_method("get_max_fps_label"):
+		_fps_btn.text = String(_settings.get_max_fps_label())
+
+
+func _add_check(parent: Node, label_text: String, value: bool, setter: String) -> CheckButton:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	row.custom_minimum_size = Vector2(540, 30)
@@ -253,6 +410,7 @@ func _add_check(parent: Node, label_text: String, value: bool, setter: String) -
 	_register_focus(check)
 	if _first_control == null:
 		_first_control = check
+	return check
 
 
 func _fmt(v: float, as_percent: bool) -> String:
@@ -407,7 +565,7 @@ func _style_tier_button(btn: Button, tier: int, selected: bool) -> void:
 
 
 func _on_tier_picked(tier: int) -> void:
-	print("[SettingsMenu] Tier picked: %d" % tier)
+	Log.dbg("[SettingsMenu] Tier picked: %d" % tier)
 	if _settings and _settings.has_method("set_ai_helper_tier"):
 		_settings.set_ai_helper_tier(tier)
 	else:

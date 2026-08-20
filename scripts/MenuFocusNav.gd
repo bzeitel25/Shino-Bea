@@ -16,6 +16,12 @@ extends Node
 var buttons: Array = []          # ordered Array[Button]
 var wrap: bool = true            # cycle past the ends
 
+# Optional "B / Esc backs out" hook. When set, ui_cancel fires this instead of
+# doing nothing, so every Button-based choice menu (sleep destination, Sensei's
+# "shall we train?", the confirm dialog) closes on B exactly like the polled
+# list menus (Boon Dispenser, Sensei shop) already do.
+var on_cancel: Callable = Callable()
+
 # ── Stick gating ─────────────────────────────────────────────
 const NAV_INITIAL_DELAY: float = 1.5   # hold time before first repeat
 const NAV_REPEAT_RATE:   float = 0.3   # seconds between repeats after delay
@@ -32,7 +38,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if buttons.is_empty():
+	if buttons.is_empty() or not _any_navigable():
+		return
+	# Don't hijack focus that belongs to a menu stacked on top of us (e.g. a
+	# ConfirmPopup opened over the pause menu). Only steer when focus is either
+	# unclaimed or already sitting on one of our own buttons.
+	if not _may_navigate():
 		return
 
 	# Tick cooldown regardless of input state.
@@ -75,23 +86,57 @@ func _input(event: InputEvent) -> void:
 	# Consume move events so Godot's built-in focus nav doesn't double-fire.
 	if buttons.is_empty():
 		return
+	# B / Esc backs out (only when a handler was supplied). Handled here in
+	# _input so it wins over the focused Button and the tree underneath.
+	if on_cancel.is_valid() and event.is_action_pressed("ui_cancel") and not event.is_echo():
+		get_viewport().set_input_as_handled()
+		on_cancel.call()
+		return
 	if event.is_action_pressed("move_up") or event.is_action_pressed("move_left") \
 	or event.is_action_pressed("move_down") or event.is_action_pressed("move_right"):
 		get_viewport().set_input_as_handled()
 
 
 func _cycle(dir: int) -> void:
+	var n: int = buttons.size()
 	var cur: int = 0
-	for i in range(buttons.size()):
+	for i in range(n):
 		var b := buttons[i] as Button
 		if b != null and b.has_focus():
 			cur = i
 			break
-	var idx: int = cur + dir
-	if wrap:
-		idx = (idx + buttons.size()) % buttons.size()
-	else:
-		idx = clampi(idx, 0, buttons.size() - 1)
-	var nxt := buttons[idx] as Button
-	if nxt != null:
-		nxt.grab_focus()
+	# Step in `dir`, skipping any button that isn't currently navigable (hidden
+	# behind a sub-panel, or disabled). Bounded to one full loop so a menu whose
+	# buttons are all hidden simply does nothing.
+	var idx: int = cur
+	for _step in range(n):
+		idx = idx + dir
+		if wrap:
+			idx = (idx + n) % n
+		else:
+			idx = clampi(idx, 0, n - 1)
+		var nxt := buttons[idx] as Button
+		if nxt != null and _navigable(nxt):
+			nxt.grab_focus()
+			return
+
+
+# A button is navigable when it is on screen and accepting focus.
+func _navigable(b: Button) -> bool:
+	return b != null and is_instance_valid(b) and b.is_visible_in_tree() and not b.disabled
+
+
+func _any_navigable() -> bool:
+	for b in buttons:
+		if _navigable(b as Button):
+			return true
+	return false
+
+
+# True when focus is free or already on one of our buttons — i.e. this menu is
+# the one the player is currently driving, not a layer buried under a modal.
+func _may_navigate() -> bool:
+	var fo: Control = get_viewport().gui_get_focus_owner()
+	if fo == null:
+		return true
+	return buttons.has(fo)

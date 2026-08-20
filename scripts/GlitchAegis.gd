@@ -55,10 +55,10 @@ func _ready() -> void:
 		""", true)
 
 	if _install_id == "" or _install_id == "null":
-		print("GlitchAegis: No install_id found — payouts disabled (local testing?).")
+		Log.dbg("GlitchAegis: No install_id found — payouts disabled (local testing?).")
 		return
 
-	print("GlitchAegis: install_id = ", _install_id)
+	Log.dbg(str("GlitchAegis: install_id = ", _install_id))
 
 	# --- build child nodes ---
 	_http = HTTPRequest.new()
@@ -82,7 +82,7 @@ func _send_heartbeat() -> void:
 	if _install_id == "":
 		return
 	if TITLE_TOKEN == "YOUR_TITLE_TOKEN":
-		print("GlitchAegis: Title token not configured — skipping heartbeat.")
+		Log.dbg("GlitchAegis: Title token not configured — skipping heartbeat.")
 		return
 
 	var headers : PackedStringArray = PackedStringArray([
@@ -96,18 +96,18 @@ func _send_heartbeat() -> void:
 
 	var err := _http.request(API_URL, headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
-		print("GlitchAegis: HTTP request error: ", err)
+		Log.dbg(str("GlitchAegis: HTTP request error: ", err))
 
 func _on_request_completed(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
 	match response_code:
 		200:
-			print("GlitchAegis: Heartbeat OK — payout recorded.")
+			Log.dbg("GlitchAegis: Heartbeat OK — payout recorded.")
 		403:
-			print("GlitchAegis: 403 — session expired or invalid license.")
+			Log.dbg("GlitchAegis: 403 — session expired or invalid license.")
 			# Optionally pause the game or show a purchase-required screen
 		401:
-			print("GlitchAegis: 401 — Title Token invalid or revoked.")
+			Log.dbg("GlitchAegis: 401 — Title Token invalid or revoked.")
 		422:
-			print("GlitchAegis: 422 — missing user_install_id.")
+			Log.dbg("GlitchAegis: 422 — missing user_install_id.")
 		_:
-			print("GlitchAegis: Unexpected response: ", response_code)
+			Log.dbg(str("GlitchAegis: Unexpected response: ", response_code))

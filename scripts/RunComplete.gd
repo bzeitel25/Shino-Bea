@@ -69,10 +69,29 @@ func _populate_summary() -> void:
 			# divider lines + uppercase make the accolade pop on its own.
 			accolade = "\n\n--- SOLO SAVANT ---\nNo-help run — Tier 1 the whole way."
 
-	summary_label.text = "Arenas cleared: %d   |   Boons taken: %d   |   Apple Pies used: %d   |   Apple Juices used: %d\n\nDragon Souls earned: %d%s%s" % [
+	# Phase 4 — the win screen used to print counts only ("Boons taken: 12")
+	# and never said WHICH twelve, so the build you spent the run assembling
+	# vanished without a look at it. Time and kills come from run_stats.
+	var time_line: String = ""
+	var kill_line: String = ""
+	var boon_line: String = ""
+	if rs and "run_stats" in rs:
+		var st: Dictionary = rs.run_stats
+		time_line = "   |   Time: %s" % StatsState.format_duration(StatsState.elapsed_ms(st))
+		kill_line = "   |   Enemies felled: %d" % int(st.get("enemies_killed", 0))
+		var ids: Array = st.get("boon_ids", [])
+		if not ids.is_empty():
+			var names: PackedStringArray = []
+			for id in ids:
+				var entry: Dictionary = BoonDB.BOON_POOL.get(String(id), {})
+				names.append(String(entry.get("name", String(id))))
+			boon_line = "\n\nYour build:  " + "  ·  ".join(names)
+
+	summary_label.text = "Arenas cleared: %d   |   Boons taken: %d   |   Apple Pies used: %d   |   Apple Juices used: %d%s%s\n\nDragon Souls earned: %d%s%s%s" % [
 		arenas, boon_count, pie_count, juice_count,
+		time_line, kill_line,
 		(rs.dragon_souls if rs and "dragon_souls" in rs else 0),
-		tier_line, accolade,
+		tier_line, accolade, boon_line,
 	]
 
 
@@ -99,6 +118,11 @@ func _finalize_run() -> void:
 		# wipes boons_taken (the save below persists it).
 		if rs.has_method("bank_run_karma"):
 			rs.bank_run_karma()
+		# Phase 4 — freeze the timer and roll this run into the lifetime records
+		# as a WIN. Must also happen before reset_run() clears run_stats.
+		# _populate_summary() has already read its numbers, so this is safe here.
+		StatsState.end_run(rs.run_stats)
+		StatsState.bank_run(rs.run_stats, rs.lifetime_stats, true)
 		if "resume_scene_path" in rs:
 			rs.resume_scene_path = ""
 		if rs.has_method("reset_run"):
@@ -106,7 +130,7 @@ func _finalize_run() -> void:
 	var sm: Node = get_node_or_null("/root/SaveManager")
 	if sm and sm.has_method("save_active_slot") and sm.active_slot >= 0:
 		sm.save_active_slot()
-		print("[RunComplete] Run finalized + saved (resume cleared, run reset, sparks kept).")
+		Log.dbg("[RunComplete] Run finalized + saved (resume cleared, run reset, sparks kept).")
 
 
 func _process(_delta: float) -> void:
@@ -121,7 +145,7 @@ func _on_return_pressed() -> void:
 	if _returning:
 		return
 	_returning = true
-	print("[RunComplete] Returning to Dojo.")
+	Log.dbg("[RunComplete] Returning to Dojo.")
 	if get_node_or_null("/root/FX") and FX.has_method("fade_to_black"):
 		FX.fade_to_black(0.4, 0.05, 1.0, Callable(self, "_do_return"))
 	else:

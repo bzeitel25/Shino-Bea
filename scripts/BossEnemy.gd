@@ -234,7 +234,7 @@ func _update_phase() -> void:
 
 
 func _on_phase_change(phase: int) -> void:
-	print("[Boss] Entering Phase %d!" % phase)
+	Log.dbg("[Boss] Entering Phase %d!" % phase)
 	# Run 15 — phase change broadcast (HUD bar may recolor per phase)
 	var fx_p := get_node_or_null("/root/FX")
 	if fx_p and fx_p.has_method("notify_boss_phase"):
@@ -305,7 +305,7 @@ func _pick_and_start_windup() -> void:
 	_attack_timer = _windup_for(_pending_attack)
 	_show_aoe_indicator(_pending_attack)
 	_trigger_flash(_tell_color_for(_pending_attack), _attack_timer)
-	print("[Boss] Starting windup: %s (phase %d)" % [AttackType.keys()[_pending_attack], current_phase])
+	Log.dbg("[Boss] Starting windup: %s (phase %d)" % [AttackType.keys()[_pending_attack], current_phase])
 
 
 func _windup_for(a: AttackType) -> float:
@@ -462,7 +462,7 @@ func _do_slam() -> void:
 	if has_node("/root/FX"):
 		get_node("/root/FX").screen_shake(10.0, 0.30)
 	_spawn_slam_particles()
-	print("[Boss] SLAM fired at %s — %dpx radius" % [str(_slam_pos), SLAM_RADIUS])
+	Log.dbg("[Boss] SLAM fired at %s — %dpx radius" % [str(_slam_pos), SLAM_RADIUS])
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +642,7 @@ func _die() -> void:
 	if has_node("/root/FX"):
 		get_node("/root/FX").screen_shake(14.0, 0.45)
 	_spawn_death_particles()
-	print("[Boss] DEFEATED! Final HP: %d / %d" % [current_hp, max_hp])
+	Log.dbg("[Boss] DEFEATED! Final HP: %d / %d" % [current_hp, max_hp])
 	# Brief pause before freeing so the death flash reads
 	get_tree().create_timer(0.45).timeout.connect(func(): queue_free())
 

@@ -1,19 +1,35 @@
 extends Node2D
 
 # ============================================================
-# DreamHub.gd — Run 43 (2026-06-10) — Dream Seedy City Town Square
+# DreamHub.gd — Dream Seedy City Town Square (Run 43, rebuilt Run 167)
 # ============================================================
+# Run 167 (Bruno): "make the night island square match the daytime
+# one, with a nighttime overlay over the world like the biomes have."
+#
+# So this scene no longer builds a plaza of its own. It calls the
+# SAME builder the waking-world Town Square calls (TownBuild.gd) with
+# the SAME RunState.town_visual_tier(), which means:
+#   * identical ground bake, border walls, building fronts,
+#     central Dojo, torii gates, carnival arch, props and townsfolk;
+#   * healing the town upgrades BOTH squares at once, because the
+#     tier is read from the same place;
+#   * the only night-side difference is the CanvasModulate night
+#     tint (Run 113) + the street lamps burning at night strength.
+#
+# On top of the shared square the dream layer adds:
 # The street outside the Dream-Dojo (GDD §7 Town-Square model).
 # Run start drops the ninjas here; it is the between-biome hub:
 #
 #   * 5 CITY GATES at the compass points (DreamBiomes.HUB_GATE_POS):
 #     walk up + [E] to enter that biome (8-room run). Cleansed
 #     biomes show ✓ and stay closed.
-#   * SHOP STANDS (Run 45) — 3 random picks out of {Juice 75c,
-#     DragonFruit 100c, Pie 100c, Mystery Boon 100c}, one purchase
-#     each per hub visit (restock every return). Low chance a
-#     DRAGON SOUL stand appears (300c) — once bought it never
-#     restocks again this run.
+#   * SHOP STANDS (Run 45; rebuilt Run 167) — 3 random picks out of
+#     {Juice 75c, DragonFruit 100c, Pie 100c, Mystery Boon 100c},
+#     one purchase each per hub visit (restock every return). Low
+#     chance a DRAGON SOUL stand appears (300c) — once bought it
+#     never restocks again this run. The stands are now real vendor
+#     tables set up just north of the south carnival torii, run by
+#     the DRAGON FRUIT family, with the boon icons as their goods.
 #   * TOWN-SQUARE DEFENSE — once all 5 biomes are cleansed, a
 #     5-wave gauntlet of mixed-biome monsters pours into the
 #     plaza. Clearing it opens the CAKE PORTAL (center-north)
@@ -24,17 +40,21 @@ extends Node2D
 # ============================================================
 
 const DB = preload("res://scripts/DreamBiomes.gd")
-const DT = preload("res://scripts/DreamTerrain.gd")
 const DreamSpawnerScript = preload("res://scripts/DreamSpawner.gd")
 # Run 151 — hand-drawn torii gate sprites + swirling portal effects.
 const TORII = preload("res://scripts/ToriiGate.gd")
+# Run 167 — the square itself is built by the SHARED builder, so the dream
+# hub and the waking-world Town Square are the same town. See TownBuild.gd.
+const TB = preload("res://scripts/TownBuild.gd")
+const SHOP = preload("res://scripts/ShopStand.gd")
 
 const DREAM_ROOM_PATH: String = "res://scenes/DreamRoom.tscn"
 const CAKE_ASCEND_PATH: String = "res://scenes/CakeAscend.tscn"
 const BOON_OFFER_SCENE: String = "res://scenes/BoonOffer.tscn"
 
-const HALF_W: float = 710.0
-const HALF_H: float = 400.0
+# Arena geometry is TownBuild's — never diverge from the day square.
+const HALF_W: float = TB.HALF_W
+const HALF_H: float = TB.HALF_H
 
 const SHOP_JUICE_COST: int = 75
 const SHOP_PIE_COST:   int = 100
@@ -45,9 +65,6 @@ const SHOP_SPARK_CHANCE: float = 0.15   # low chance the spark stand appears
 const GAUNTLET_REWARD_COINS: int = 100
 const GAUNTLET_WAVES: int = 5
 
-const PLAZA_COLOR: Color      = Color(0.30, 0.28, 0.34)   # night-street cobbles
-const PLAZA_ALT_COLOR: Color  = Color(0.34, 0.32, 0.38)
-const WALL_COLOR: Color       = Color(0.22, 0.20, 0.26)
 
 var _interactables: Array = []   # [{zone, kind, id, label, prompt, in_range}]
 var _busy: bool = false          # true during fades / gauntlet wave spawns
@@ -55,7 +72,8 @@ var _gauntlet_active: bool = false
 var _gauntlet_wave: int = 0
 var _poll_timer: float = 0.0
 var _shop_used: Dictionary = {}   # filled by _build_shops() per stocked stand
-var _shop_stands: Dictionary = {} # id -> {booth, lbl, title, col, entry} for SOLD-OUT visuals
+var _shop_slot_count: int = 0     # how many TB.SHOP_SLOTS are occupied this visit
+var _shop_stands: Dictionary = {} # id -> ShopStand parts dict + entry (SOLD-OUT visuals)
 
 @onready var banner: Label = $DebugHUD/BannerLabel
 @onready var hint: Label = $DebugHUD/HintLabel
@@ -69,15 +87,27 @@ func _ready() -> void:
 	RunState.current_biome = ""
 	RunState.biome_room = 1
 
-	# Leaving a biome → switch off biome music. Plays Town Square music if/when
-	# tracks are dropped into Assets/Music/TownSquare/, otherwise fades to silence.
-	MusicManager.play_area("town")
+	# Leaving a biome → switch off biome music. Plays the nighttime Dream World
+	# hub music if/when tracks are dropped into Assets/Music/Town_Night/,
+	# otherwise fades to silence.
+	MusicManager.play_area("town_night")
 
-	_build_plaza()
+	# Run 167 — the square is the DAY square, built from the shared builder at
+	# the live healing tier, then tinted to night. Order matters: terrain →
+	# landmark → gates/arch → props (they need the shop keepouts) → folk.
+	y_sort_enabled = true
+	var tier: int = RunState.town_visual_tier()
+	Log.dbg("[DreamHub] Town visual tier: %d (0=delap 1=healing 2=perfect)." % tier)
+	TB.build_terrain(self, tier, true)
+	TB.build_dojo_landmark(self, "THE DREAM DOJO")
 	_build_gates()
+	_build_carnival_arch()
 	_build_shops()
+	TB.build_props(self, tier, TB.prop_keepouts() + TB.shop_keepouts(_shop_slot_count), true)
+	TB.build_townsfolk(self)   # Run 167b: parked until generic townsfolk art lands
 	if RunState.gauntlet_cleared:
 		_build_cake_portal()
+	_place_heroes()
 
 	_refresh_banner()
 
@@ -107,63 +137,18 @@ func _ready() -> void:
 # Pure overlay — changes nothing about the built hub; tune RunState.NIGHT_TINT.
 # ---------------------------------------------------------------------------
 func _apply_night_overlay() -> void:
-	if get_node_or_null("NightOverlay") != null:
-		return
-	var night := CanvasModulate.new()
-	night.name = "NightOverlay"
-	night.color = RunState.NIGHT_TINT
-	add_child(night)
+	TB.apply_night_overlay(self)
 
 
-# ---------------------------------------------------------------------------
-# Build — plaza, dojo facade, walls
-# ---------------------------------------------------------------------------
-
-func _build_plaza() -> void:
-	# Run 44: procedural pixel cobbles + dream-night void replace the flat rects.
-	var hub_biome: Dictionary = {
-		"floor": PLAZA_COLOR,
-		"floor_alt": PLAZA_ALT_COLOR,
-		"wall": WALL_COLOR,
-		"accent": Color(0.95, 0.75, 0.35),   # lantern glow
-	}
-	DT.build(self, "hub", hub_biome, Vector2(HALF_W, HALF_H), 7770, 0.0, "void")
-
-	# Dream-Dojo facade — center of the square (where the run "begins").
-	var dojo := ColorRect.new()
-	dojo.offset_left = -90; dojo.offset_top = -64
-	dojo.offset_right = 90; dojo.offset_bottom = 30
-	dojo.color = Color(0.16, 0.12, 0.18)
-	dojo.z_index = -10
-	add_child(dojo)
-	# Run 146 — "DREAM DOJO" floating label removed; replaced by framed
-	# HintPopup tooltip on scene entry (see _ready below).
-
-	var walls := Node2D.new()
-	walls.name = "Walls"
-	add_child(walls)
-	_make_wall(walls, Vector2(0, -HALF_H - 16), Vector2(HALF_W * 2 + 64, 32))
-	_make_wall(walls, Vector2(0, HALF_H + 16), Vector2(HALF_W * 2 + 64, 32))
-	_make_wall(walls, Vector2(-HALF_W - 16, 0), Vector2(32, HALF_H * 2 + 64))
-	_make_wall(walls, Vector2(HALF_W + 16, 0), Vector2(32, HALF_H * 2 + 64))
-
-
-func _make_wall(parent: Node, pos: Vector2, size: Vector2) -> void:
-	var w := StaticBody2D.new()
-	w.position = pos
-	w.collision_layer = 1
-	w.collision_mask = 0
-	var vis := ColorRect.new()
-	vis.offset_left = -size.x * 0.5; vis.offset_top = -size.y * 0.5
-	vis.offset_right = size.x * 0.5; vis.offset_bottom = size.y * 0.5
-	vis.color = WALL_COLOR
-	w.add_child(vis)
-	var cs := CollisionShape2D.new()
-	var shape := RectangleShape2D.new()
-	shape.size = size
-	cs.shape = shape
-	w.add_child(cs)
-	parent.add_child(w)
+# Heroes start on the Dojo doorstep, exactly where the day square puts them.
+func _place_heroes() -> void:
+	var spawn: Vector2 = TB.doorstep()
+	var pl := get_node_or_null("Player")
+	if pl:
+		(pl as Node2D).position = spawn + Vector2(-26, 0)
+	var be := get_node_or_null("Bea")
+	if be:
+		(be as Node2D).position = spawn + Vector2(26, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -173,55 +158,42 @@ func _make_wall(parent: Node, pos: Vector2, size: Vector2) -> void:
 func _build_gates() -> void:
 	for biome_id in DB.BIOME_ORDER:
 		var biome: Dictionary = DB.get_biome(biome_id)
-		var raw: Vector2 = DB.HUB_GATE_POS[biome_id]
-		# Position flush against the perimeter wall.
-		var pos := Vector2(
-			clamp(raw.x, -HALF_W + 10, HALF_W - 10),
-			clamp(raw.y, -HALF_H + 10, HALF_H - 10))
 		var cleared: bool = bool(RunState.biomes_cleared.get(biome_id, false))
 
-		var gate := Node2D.new()
-		gate.name = "HubGate_%s" % biome_id
-		gate.position = pos
-		add_child(gate)
-
-		# Run 151 — hand-drawn torii sprite + swirling portal.
-		# Portal active only for uncleansed biomes; cleansed gates show the
-		# torii architecture alone (no swirl — the path is closed).
-		var torii := TORII.build(biome_id, not cleared)
-		gate.add_child(torii)
-		# Dim the gate sprite when cleansed so it reads as "done".
+		# Run 167 — same builder, same anchor, same torii the day square uses.
+		# Portal active only for uncleansed biomes; a cleansed gate shows the
+		# architecture alone (no swirl — the path is closed).
+		var gate: Node2D = TB.build_gate(self, String(biome_id), not cleared, "HubGate")
 		if cleared:
-			var spr := torii.get_node_or_null("GateSprite")
-			if spr:
-				spr.modulate = Color(0.6, 0.7, 0.6, 0.85)
+			var spr := gate.get_node_or_null("ToriiGate_%s/GateSprite" % biome_id)
+			if spr is CanvasItem:
+				(spr as CanvasItem).modulate = Color(0.6, 0.7, 0.6, 0.85)
 
 		var tier: int = RunState.biomes_cleared_count()
-		var name_label := Label.new()
-		name_label.text = "%s\n%s %s" % [
-			String(biome["direction"]),
-			String(biome["display"]),
-			("✓ CLEANSED" if cleared else "— Tier %s" % _roman(tier + 1))]
-		name_label.add_theme_font_size_override("font_size", 13)
-		name_label.add_theme_color_override("font_color",
+		TB.add_gate_label(gate, "%s\n%s %s" % [
+				String(biome["direction"]),
+				String(biome["display"]),
+				("\u2713 CLEANSED" if cleared else "\u2014 Tier %s" % _roman(tier + 1))],
 			Color(0.55, 0.85, 0.55) if cleared else Color(1, 1, 1))
-		name_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-		name_label.add_theme_constant_override("outline_size", 3)
-		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		# Label points inward from the wall so it stays inside the arena.
-		var lbl_off := Vector2(-100, -150)
-		if pos.y < -HALF_H + 60:       # north wall — label below
-			lbl_off = Vector2(-100, 50)
-		elif pos.x > HALF_W - 60:      # east wall — label to the left
-			lbl_off = Vector2(-240, -36)
-		elif pos.x < -HALF_W + 60:     # west wall — label to the right
-			lbl_off = Vector2(40, -36)
-		name_label.position = lbl_off
-		name_label.custom_minimum_size = Vector2(200, 0)
-		gate.add_child(name_label)
 
 		if not cleared:
-			_add_interactable(gate, "gate", biome_id, "Enter %s" % String(biome["display"]))
+			_add_interactable(gate, "gate", String(biome_id), "Enter %s" % String(biome["display"]))
+
+
+# ---------------------------------------------------------------------------
+# Build — the south carnival arch. Shut at night in both directions: the fair
+# doesn't run after dark, and the troupe's merchants are camped in front of it.
+# ---------------------------------------------------------------------------
+func _build_carnival_arch() -> void:
+	# Run 167b (Bruno): no portal in the night arch, and walking up to it tells
+	# you so. The fair never runs after dark — the road south is simply shut.
+	# (Something may open here later: a secret night biome is the standing idea.)
+	var open_by_day: bool = RunState.carnival_open()
+	var blurb: String = "The lanterns are dark \u2014 the fair sleeps." if open_by_day \
+		else "The Dragon Fruit troupe hasn't come to town yet."
+	var arch: Node2D = TB.build_carnival_arch(self, "S \u2014 CARNIVAL ROAD\n%s" % blurb,
+		Color(0.95, 0.65, 0.75), false)
+	_add_interactable(arch, "carnival", "carnival", "Try the carnival road")
 
 
 func _roman(n: int) -> String:
@@ -239,58 +211,50 @@ func _build_shops() -> void:
 	# once bought; keeps re-rolling until you do buy it).
 	# Run 46 — Haggler's Tongue (Sensei Z): prices shown and charged via
 	# RunState.get_shop_price() (-5%/rank).
+	# Run 167 — each pick becomes a real carnival vendor table north of the
+	# south torii, staffed by the Dragon Fruit family (ShopStand.gd).
 	var catalog: Array = [
-		{"id": "juice",       "icon": "🧃", "title": "JUICE STAND",  "desc": "Heal both 50%%  —  %dc" % RunState.get_shop_price(SHOP_JUICE_COST), "col": Color(0.30, 0.80, 0.95)},
-		{"id": "dragonfruit", "icon": "🐉", "title": "DRAGONFRUIT",  "desc": "Level up a boon  —  %dc" % RunState.get_shop_price(SHOP_DF_COST),   "col": Color(0.95, 0.35, 0.55)},
-		{"id": "pie",         "icon": "🥧", "title": "PIE STAND",    "desc": "+Max HP  —  %dc" % RunState.get_shop_price(SHOP_PIE_COST),          "col": Color(0.95, 0.75, 0.25)},
-		{"id": "boon",        "icon": "✦",  "title": "MYSTERY BOON", "desc": "???  —  %dc" % RunState.get_shop_price(SHOP_BOON_COST),             "col": Color(0.75, 0.40, 0.95)},
+		{"id": "juice",       "title": "JUICE STAND",  "desc": "Heal both 50%%  \u2014  %dc" % RunState.get_shop_price(SHOP_JUICE_COST)},
+		{"id": "dragonfruit", "title": "POM STAND",    "desc": "Level up a boon  \u2014  %dc" % RunState.get_shop_price(SHOP_DF_COST)},
+		{"id": "pie",         "title": "PIE STAND",    "desc": "+Max HP  \u2014  %dc" % RunState.get_shop_price(SHOP_PIE_COST)},
+		{"id": "boon",        "title": "MYSTERY BOON", "desc": "???  \u2014  %dc" % RunState.get_shop_price(SHOP_BOON_COST)},
 	]
 	# DragonFruit needs something to level — same gate as the dream doors.
 	if RunState.shino_boon_set.is_empty() or RunState.bea_boon_set.is_empty():
 		catalog = catalog.filter(func(c): return String(c.id) != "dragonfruit")
 	catalog.shuffle()
 	var stands: Array = catalog.slice(0, min(3, catalog.size()))
-	var positions: Array = [Vector2(-170, 150), Vector2(0, 170), Vector2(170, 150)]
 	if not RunState.shop_spark_bought and randf() < SHOP_SPARK_CHANCE:
-		stands.append({"id": "spark", "icon": "✨", "title": "DRAGON SOUL",
-			"desc": "Permanent power  —  %dc" % RunState.get_shop_price(SHOP_SPARK_COST), "col": Color(1.0, 0.85, 0.30)})
-		positions.append(Vector2(340, 110))
+		stands.append({"id": "spark", "title": "DRAGON SOUL",
+			"desc": "Permanent power  \u2014  %dc" % RunState.get_shop_price(SHOP_SPARK_COST)})
+	stands = stands.slice(0, min(stands.size(), TB.SHOP_SLOTS.size()))
+	_shop_slot_count = stands.size()
+
+	# One y-sorted host for the whole market row so the tables, the keeper and
+	# the heroes all share the square's foot-Y sort space.
+	var row := Node2D.new()
+	row.name = "ShopRow"
+	row.y_sort_enabled = true
+	add_child(row)
+
+	# Run 167b (Bruno): ONE Dragon Fruit boy minds the whole row. Tally stands
+	# behind the counters; the rest of the troupe stay at the Carnival.
+	const FOLK = preload("res://scripts/TownFolk.gd")
+	FOLK.make(row, SHOP.KEEPER, TB.SHOP_KEEPER_POS, false, SHOP.KEEPER_SCALE)
+
 	_shop_used.clear()
 	_shop_stands.clear()
 	for i in range(stands.size()):
-		var s: Dictionary = stands[i]
-		s["pos"] = positions[i]
-		_shop_used[String(s.id)] = false
-		var stand := Node2D.new()
-		stand.name = "Shop_%s" % String(s.id)
-		stand.position = s.pos
-		add_child(stand)
-
-		var booth := ColorRect.new()
-		booth.offset_left = -34; booth.offset_top = -26
-		booth.offset_right = 34; booth.offset_bottom = 26
-		booth.color = (s.col as Color).darkened(0.45)
-		stand.add_child(booth)
-
-		var icon := Label.new()
-		icon.text = String(s.icon)
-		icon.add_theme_font_size_override("font_size", 30)
-		icon.position = Vector2(-16, -22)
-		stand.add_child(icon)
-
-		var lbl := Label.new()
-		lbl.text = "%s\n%s" % [String(s.title), String(s.desc)]
-		lbl.add_theme_font_size_override("font_size", 12)
-		lbl.add_theme_color_override("font_color", s.col)
-		lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-		lbl.add_theme_constant_override("outline_size", 3)
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lbl.position = Vector2(-70, 32)
-		lbl.custom_minimum_size = Vector2(140, 0)
-		stand.add_child(lbl)
-
-		var entry: Dictionary = _add_interactable(stand, "shop", String(s.id), "Buy")
-		_shop_stands[String(s.id)] = {"booth": booth, "lbl": lbl, "title": String(s.title), "orig_text": lbl.text, "col": s.col, "entry": entry}
+		var st: Dictionary = stands[i]
+		var sid: String = String(st.id)
+		var pos: Vector2 = TB.SHOP_SLOTS[i]
+		_shop_used[sid] = false
+		var parts: Dictionary = SHOP.build(row, sid, pos, String(st.title),
+			String(st.desc), pos.x > 0.0)
+		var entry: Dictionary = _add_interactable(parts["root"], "shop", sid, "Buy",
+			Vector2(-84, -212))
+		parts["entry"] = entry
+		_shop_stands[sid] = parts
 
 
 # ---------------------------------------------------------------------------
@@ -298,11 +262,28 @@ func _build_shops() -> void:
 # ---------------------------------------------------------------------------
 
 func _build_cake_portal() -> void:
+	# Run 167 — the Fortress opens in the NORTH TORII rather than floating in
+	# the middle of the plaza: with the Dojo now standing at the centre of the
+	# square (day-parity) there is no room for a free-standing ring, and by the
+	# time the gauntlet is cleared every biome gate is shut anyway — so the
+	# north gate is free to become the way up. The dirt spine already runs to
+	# its foot, which makes it read as the road out of town.
 	if get_node_or_null("CakePortal") != null:
 		return
+	var gate := get_node_or_null("HubGate_peaks") as Node2D
+	var anchor: Vector2 = TB.gate_pos("peaks")
+	if gate != null:
+		# Re-light the cleansed gate and hide its "CLEANSED" plate.
+		var spr := gate.get_node_or_null("ToriiGate_peaks/GateSprite")
+		if spr is CanvasItem:
+			(spr as CanvasItem).modulate = Color(1, 1, 1, 1)
+		var old_lbl := gate.get_node_or_null("GateLabel")
+		if old_lbl is CanvasItem:
+			(old_lbl as CanvasItem).visible = false
+
 	var portal := Node2D.new()
 	portal.name = "CakePortal"
-	portal.position = Vector2(0, -HALF_H + 90)
+	portal.position = anchor + Vector2(0, 34)
 	add_child(portal)
 
 	var ring := Line2D.new()
@@ -311,13 +292,9 @@ func _build_cake_portal() -> void:
 	for i in range(33):
 		var a: float = TAU * float(i) / 32.0
 		ring.add_point(Vector2(cos(a), sin(a)) * 46.0)
+	ring.z_as_relative = false
+	ring.z_index = 3
 	portal.add_child(ring)
-
-	var icon := Label.new()
-	icon.text = "🍰"
-	icon.add_theme_font_size_override("font_size", 44)
-	icon.position = Vector2(-26, -34)
-	portal.add_child(icon)
 
 	var lbl := Label.new()
 	lbl.text = "DRAGON CAKE FORTRESS\nThe finale awaits above..."
@@ -326,18 +303,22 @@ func _build_cake_portal() -> void:
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	lbl.add_theme_constant_override("outline_size", 3)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.position = Vector2(-90, 52)
+	lbl.position = Vector2(-90, 56)
 	lbl.custom_minimum_size = Vector2(180, 0)
+	lbl.z_as_relative = false
+	lbl.z_index = 12
 	portal.add_child(lbl)
 
-	_add_interactable(portal, "portal", "cake", "Ascend to the Dragon Cake Fortress")
+	_add_interactable(portal, "portal", "cake", "Ascend to the Dragon Cake Fortress",
+		Vector2(-90, 96))
 
 
 # ---------------------------------------------------------------------------
 # Interactables — proximity + [E]
 # ---------------------------------------------------------------------------
 
-func _add_interactable(host: Node2D, kind: String, id: String, action: String) -> Dictionary:
+func _add_interactable(host: Node2D, kind: String, id: String, action: String,
+		prompt_off: Vector2 = Vector2(-70, 42)) -> Dictionary:
 	var zone := Area2D.new()
 	zone.collision_layer = 0
 	zone.collision_mask = 2
@@ -349,12 +330,12 @@ func _add_interactable(host: Node2D, kind: String, id: String, action: String) -
 	host.add_child(zone)
 
 	var prompt := Label.new()
-	prompt.text = "[E] %s" % action
+	InputGlyphs.bind_label(prompt, "[{interact}] %s" % action)   # Run 158 — live device glyph
 	prompt.add_theme_font_size_override("font_size", 14)
 	prompt.add_theme_color_override("font_color", Color(1.0, 1.0, 0.7))
 	prompt.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.0))
 	prompt.add_theme_constant_override("outline_size", 3)
-	prompt.position = Vector2(-70, 42)   # below the gate, always inside the arena
+	prompt.position = prompt_off   # below a gate, above a shop counter
 	prompt.visible = false
 	prompt.z_index = 20
 	host.add_child(prompt)
@@ -389,9 +370,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not bool(entry.in_range):
 			continue
 		match String(entry.kind):
-			"gate":   _enter_biome(String(entry.id))
-			"shop":   _try_buy(String(entry.id))
-			"portal": _ascend()
+			"gate":     _enter_biome(String(entry.id))
+			"shop":     _try_buy(String(entry.id))
+			"portal":   _ascend()
+			"carnival": _flash_hint("The road south is shut \u2014 the fair doesn't run at night.")
 		return
 
 
@@ -408,7 +390,7 @@ func _enter_biome(biome_id: String) -> void:
 	if RunState.has_pending_reward():
 		RunState.consume_pending_reward()
 	var biome: Dictionary = DB.get_biome(biome_id)
-	print("[DreamHub] Entering %s." % String(biome["display"]))
+	Log.dbg("[DreamHub] Entering %s." % String(biome["display"]))
 	FX.fade_to_black(0.45, 0.05, 1.0, Callable(self, "_goto_dream_room"))
 
 
@@ -461,19 +443,13 @@ func _try_buy(shop_id: String) -> void:
 
 
 func _mark_stand_sold(shop_id: String) -> void:
-	# Grey the booth, relabel "SOLD OUT", and kill the [E] Buy prompt so a bought
+	# Grey the goods, relabel "SOLD OUT", and kill the [E] Buy prompt so a bought
 	# stand can't be re-purchased and clearly reads as unavailable this visit.
-	var s: Dictionary = _shop_stands.get(shop_id, {})
-	if s.is_empty():
+	var parts: Dictionary = _shop_stands.get(shop_id, {})
+	if parts.is_empty():
 		return
-	var booth := s.get("booth") as ColorRect
-	if booth:
-		booth.color = Color(0.18, 0.18, 0.20)
-	var lbl := s.get("lbl") as Label
-	if lbl:
-		lbl.text = "%s\nSOLD OUT" % String(s.get("title", ""))
-		lbl.add_theme_color_override("font_color", Color(0.55, 0.55, 0.58))
-	var entry: Dictionary = s.get("entry", {})
+	SHOP.set_sold(parts, true)
+	var entry: Dictionary = parts.get("entry", {})
 	if not entry.is_empty():
 		entry.in_range = false
 		var prompt := entry.get("prompt") as Label
@@ -482,19 +458,11 @@ func _mark_stand_sold(shop_id: String) -> void:
 
 
 func _restock_stand_visual(shop_id: String) -> void:
-	# Inverse of _mark_stand_sold — restore a stand's available look (used by the
-	# post-gauntlet restock; the per-biome restock rebuilds stands from scratch).
-	var s: Dictionary = _shop_stands.get(shop_id, {})
-	if s.is_empty():
-		return
-	var col: Color = s.get("col", Color.WHITE)
-	var booth := s.get("booth") as ColorRect
-	if booth:
-		booth.color = col.darkened(0.45)
-	var lbl := s.get("lbl") as Label
-	if lbl:
-		lbl.text = String(s.get("orig_text", lbl.text))
-		lbl.add_theme_color_override("font_color", col)
+	# Inverse of _mark_stand_sold — used by the post-gauntlet restock (the
+	# per-biome restock rebuilds the whole row from scratch).
+	var parts: Dictionary = _shop_stands.get(shop_id, {})
+	if not parts.is_empty():
+		SHOP.set_sold(parts, false)
 
 
 func _spawn_boon_overlay() -> void:
@@ -542,15 +510,26 @@ func _spawn_gauntlet_wave() -> void:
 		var e: Node = (load(scene_path) as PackedScene).instantiate()
 		DreamSpawnerScript.apply_config(e, cfg, 5)
 		add_child(e)
+		# Run 167 — the Dojo landmark now fills the middle of the square, so the
+		# old 220-360px ring would drop half the wave inside the building. Spawn
+		# on the OUTER ring instead (an ellipse just outside the ring road) and
+		# push anything that still lands on the Dojo footprint clear of it.
 		var a: float = TAU * float(i) / float(n) + randf_range(-0.3, 0.3)
-		var pos := Vector2(cos(a), sin(a)) * randf_range(220.0, 360.0)
+		var r: float = randf_range(1.0, 1.28)
+		var pos := TB.DOJO_CENTER + Vector2(cos(a) * 420.0 * r, sin(a) * 268.0 * r)
+		var d: Vector2 = pos - TB.DOJO_CENTER
+		var keep := Vector2(TB.DOJO_BODY_SIZE.x * 0.5 + 60.0, TB.DOJO_BODY_SIZE.y * 0.5 + 60.0)
+		if absf(d.x) < keep.x and absf(d.y) < keep.y:
+			pos = TB.DOJO_CENTER + Vector2(
+				keep.x * signf(d.x if absf(d.x) > 0.01 else 1.0),
+				keep.y * signf(d.y if absf(d.y) > 0.01 else 1.0))
 		pos.x = clamp(pos.x, -HALF_W + 50, HALF_W - 50)
 		pos.y = clamp(pos.y, -HALF_H + 50, HALF_H - 50)
 		(e as Node2D).global_position = pos
 	if banner:
 		banner.text = "⚔️ WAVE %d / %d ⚔️" % [_gauntlet_wave, GAUNTLET_WAVES]
 	_poll_timer = 0.5
-	print("[DreamHub] Gauntlet wave %d — %d enemies." % [_gauntlet_wave, n])
+	Log.dbg("[DreamHub] Gauntlet wave %d — %d enemies." % [_gauntlet_wave, n])
 
 
 func _process(delta: float) -> void:
@@ -581,7 +560,7 @@ func _finish_gauntlet() -> void:
 	if get_node_or_null("/root/SaveManager") and SaveManager.active_slot >= 0:
 		SaveManager.save_active_slot()
 	FX.screen_shake(FX.SHAKE_LIGHT, 0.5)
-	print("[DreamHub] Gauntlet cleared — Cake Portal open.")
+	Log.dbg("[DreamHub] Gauntlet cleared — Cake Portal open.")
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +573,7 @@ func _ascend() -> void:
 	RunState.biome_room = 1
 	if RunState.has_pending_reward():
 		RunState.consume_pending_reward()
-	print("[DreamHub] Ascending to the Dragon Cake Fortress.")
+	Log.dbg("[DreamHub] Ascending to the Dragon Cake Fortress.")
 	FX.fade_to_black(0.6, 0.1, 1.0, Callable(self, "_goto_cake"))
 
 

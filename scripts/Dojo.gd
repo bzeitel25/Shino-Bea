@@ -123,7 +123,7 @@ func _ready() -> void:
 			return
 		var H = load("res://scripts/HintPopup.gd")
 		H.show_combat_hint(_host, "Combat Controls",
-			"Tap Y for combos  •  Hold Y to charge  •  X for heavy attacks  •  Q+Q swaps ninja  •  Hit the Training Dummy to practise")
+			"Tap {attack_y} for combos  •  Hold {attack_y} to charge  •  {attack_x} for heavy attacks  •  {swap2} swaps ninja  •  Hit the Training Dummy to practise")
 	)
 
 	# Run 141 — Post-tutorial cutscene: plays once when arriving from the
@@ -388,7 +388,7 @@ func _build_front_door() -> void:
 	door.add_child(lbl)
 
 	_front_door_prompt = Label.new()
-	_front_door_prompt.text = "[E]  Step out to the Town Square"
+	InputGlyphs.bind_label(_front_door_prompt, "[{interact}]  Step out to the Town Square")   # Run 158
 	_front_door_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_front_door_prompt.add_theme_font_size_override("font_size", 13)
 	_front_door_prompt.modulate = Color(1.0, 0.95, 0.50, 1)
@@ -452,20 +452,30 @@ func _build_walls() -> void:
 	for s in segs:
 		_make_wall(walls, s[0], s[1])
 
-	# Run 154 — corner bracket sprites at wall junctions (L-joints).
+	# Run 154 — bracket sprites at wall junctions. Run 162: every call passes the
+	# INTERSECTION OF THE TWO WALL CENTRELINES; WoodScaffolding anchors the piece
+	# by its ARMS so the joint beams continue the rails exactly.
 	# "tl" = walls extend right + down; "tr" = left + down;
 	# "bl" = right + up; "br" = left + up.
-	# Main hall four corners:
+	# Main hall corners:
 	WS.place_corner(walls, Vector2(-480, -280), "tl", -6)   # NW
 	WS.place_corner(walls, Vector2(-480,  280), "bl", -6)   # SW
 	WS.place_corner(walls, Vector2( 480,  280), "br", -6)   # SE
-	WS.place_corner(walls, Vector2( 480, -280), "tr", -6)   # NE
 	# Shino's north room corners:
-	WS.place_corner(walls, Vector2( 180, -560), "tl", -6)   # NW (wall 6 top meets wall 7 left)
-	WS.place_corner(walls, Vector2( 480, -560), "tr", -6)   # NE (wall 8 top meets wall 7 right)
+	WS.place_corner(walls, Vector2( 180, -560), "tl", -6)   # NW (wall 7 top meets wall 8 left)
+	WS.place_corner(walls, Vector2( 480, -560), "tr", -6)   # NE (wall 8 right meets wall 9 top)
 	# Bea's east room corners:
-	WS.place_corner(walls, Vector2( 760, -280), "tr", -6)   # NE (wall 10 top meets wall 9 right)
-	WS.place_corner(walls, Vector2( 760,    0), "br", -6)   # SE (wall 10 bot meets wall 11 right)
+	WS.place_corner(walls, Vector2( 760, -280), "tr", -6)   # NE (wall 10 right meets wall 11 top)
+	WS.place_corner(walls, Vector2( 760,    0), "br", -6)   # SE (wall 12 right meets wall 11 bottom)
+
+	# Run 162 — the two junctions that are NOT simple L-corners.
+	# (480,-280): the main hall's NE is really a 4-WAY crossing — the north wall
+	# runs on east into Bea's room, the east wall runs on north into Shino's.
+	# It used to wear a "tr" elbow, which read as a broken corner.
+	WS.place_cross(walls, Vector2( 480, -280), -6)
+	# (180,-280): Shino's west wall drops onto the main north wall, which keeps
+	# running both ways past it — a TEE with the branch going up.
+	WS.place_tee(walls, Vector2( 180, -280), "up", -6)
 
 
 func _make_wall(parent: Node, pos: Vector2, size: Vector2) -> void:
@@ -549,6 +559,7 @@ func _bake_wall_run(host: Node2D, x0: float, x1: float, base_y: float,
 	var fx1: int = -1
 	var feat: Image = _wall_img(feature)
 	if feat != null:
+		feat = _trim_empty_columns(feat)
 		fx0 = clampi(int(feature_cx - x0) - feat.get_width() / 2, 0, maxi(w - feat.get_width(), 0))
 		fx1 = mini(fx0 + feat.get_width(), w)
 		img.blit_rect(feat, Rect2i(0, 0, fx1 - fx0, WALL_FACE_H), Vector2i(fx0, 0))
@@ -583,12 +594,84 @@ func _bake_wall_run(host: Node2D, x0: float, x1: float, base_y: float,
 		img.blit_rect(s_img, Rect2i(0, 0, take, WALL_FACE_H), Vector2i(cur, 0))
 		cur += take
 
+	_seal_wall_edges(img)
+
 	var spr := Sprite2D.new()
 	spr.texture = ImageTexture.create_from_image(img)
 	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	spr.centered = false
 	spr.position = Vector2(x0, base_y - float(WALL_FACE_H))
 	host.add_child(spr)
+
+
+# ---------------------------------------------------------------------------
+# Run 163b — WALL BAKE HYGIENE. Bruno's screenshot showed a black slit punched
+# clean through the north wall just above and right of Sensei Z.
+#
+# CAUSE: wall_alcove.png is 117px wide but its art only reaches x=111 — the
+# right-most FIVE columns are splice padding, fully transparent. _bake_wall_run
+# blitted the padded width and then resumed the panel fill at fx1, i.e. PAST
+# the padding, so those 5 columns stayed empty. The wall face has nothing
+# behind it, so the hole rendered as void: world x ≈ 54–58, y[-435,-280].
+#
+# LOCK: never trust wall art to be flush to its own bounds. Feature art is
+# trimmed to its opaque column span before placement, and the finished bake
+# gets its top/bottom edge padding clamped shut. Padding on ANY future wall
+# piece can no longer open a gap.
+# ---------------------------------------------------------------------------
+
+# Drop fully-transparent columns from both edges (interior holes are art, and
+# are left alone). Returns the source untouched when there's nothing to trim.
+func _trim_empty_columns(src: Image) -> Image:
+	var w: int = src.get_width()
+	var h: int = src.get_height()
+	var lo: int = 0
+	while lo < w and _column_empty(src, lo, h):
+		lo += 1
+	if lo >= w:
+		return src            # entirely blank — let the caller deal with it
+	var hi: int = w - 1
+	while hi > lo and _column_empty(src, hi, h):
+		hi -= 1
+	if lo == 0 and hi == w - 1:
+		return src
+	var out := Image.create(hi - lo + 1, h, false, Image.FORMAT_RGBA8)
+	out.blit_rect(src, Rect2i(lo, 0, hi - lo + 1, h), Vector2i(0, 0))
+	return out
+
+
+func _column_empty(src: Image, x: int, h: int) -> bool:
+	for y in range(h):
+		if src.get_pixel(x, y).a > 0.02:
+			return false
+	return true
+
+
+# Every wall tile carries 1–2 transparent rows of splice padding at its top and
+# bottom edge. Unsealed those become hairlines of void along the wall's edges.
+# Extend each column's outermost OPAQUE pixel outward to close them. Only the
+# edge bands are scanned, so the alcove's interior transparency is never touched.
+const WALL_EDGE_SCAN: int = 6
+
+func _seal_wall_edges(img: Image) -> void:
+	var w: int = img.get_width()
+	var h: int = img.get_height()
+	var scan: int = mini(WALL_EDGE_SCAN, h / 2)
+	for x in range(w):
+		var top: int = 0
+		while top < scan and img.get_pixel(x, top).a < 0.75:
+			top += 1
+		if top > 0 and top < scan:
+			var fill_top: Color = img.get_pixel(x, top)
+			for y in range(top):
+				img.set_pixel(x, y, fill_top)
+		var bot: int = h - 1
+		while bot > h - 1 - scan and img.get_pixel(x, bot).a < 0.75:
+			bot -= 1
+		if bot < h - 1 and bot > h - 1 - scan:
+			var fill_bot: Color = img.get_pixel(x, bot)
+			for y in range(bot + 1, h):
+				img.set_pixel(x, y, fill_bot)
 
 
 # Run 143 — real spliced art (Assets/Tilesets/Dojo_props/) replaces the old
@@ -611,14 +694,19 @@ func _build_decor() -> void:
 	_hang_paper_lantern(deco, Vector2(155, -336), 56.0)
 	_deco(deco, "rack_katana_a", Vector2(255, -240), 58.0)
 
+	# Run 163b — light energies dimmed ~28% from the first pass: this is an
+	# INDOOR dojo lit by paper and stone lanterns, not a lit street. Breath
+	# depth raised in exchange, so they read as candlelight rather than bulbs.
 	# ── Main hall, west wall ──
 	_deco(deco, "lantern_stone_a", Vector2(-445, -130), 52.0)
+	GlowLight.attach(deco, Vector2(-445, -168), GlowLight.WARM_STONE, 118.0, 0.50, 0.12)
 	_deco(deco, "bamboo_a", Vector2(-445, -40), 86.0)
 	_deco(deco, "bamboo_c", Vector2(-445, 60), 78.0)
 
 	# ── Main hall, east wall (around Bea's doorway gap y[-220,-140]) ──
 	_deco(deco, "banner_map", Vector2(450, -70), 62.0)
 	_deco(deco, "lantern_stone_c", Vector2(447, 110), 52.0)
+	GlowLight.attach(deco, Vector2(447, 72), GlowLight.WARM_STONE, 118.0, 0.50, 0.12)
 	_deco(deco, "bamboo_cut_a", Vector2(450, 215), 66.0)
 
 	# ── SW tea corner ──
@@ -631,10 +719,12 @@ func _build_decor() -> void:
 	# ── SE zen garden corner ──
 	_deco(deco, "zen_sand_a", Vector2(390, 212), 88.0, -25)
 	_deco(deco, "lantern_stone_d", Vector2(448, 180), 54.0)
+	GlowLight.attach(deco, Vector2(448, 141), GlowLight.WARM_STONE, 118.0, 0.50, 0.12)
 	_deco(deco, "bonsai_f", Vector2(336, 228), 56.0)
 
 	# ── Hall floor accents ──
 	_deco(deco, "brazier", Vector2(-262, 62), 50.0)
+	GlowLight.attach(deco, Vector2(-262, 26), GlowLight.EMBER, 180.0, 0.88, 0.20)
 	_deco_collide(deco, Vector2(-262, 58), 13.0)
 	_deco(deco, "rug_red", Vector2(0, 236), 42.0, -25)        # front-door mat
 	_deco(deco, "trap_door", Vector2(285, -246), 44.0, -25)   # ninja secret, NE corner
@@ -646,6 +736,7 @@ func _build_decor() -> void:
 	_deco(deco, "rack_stand", Vector2(448, -482), 72.0)
 	_deco(deco, "bedroll_a", Vector2(340, -432), 64.0, -25)   # on the sleeping tatami
 	_deco(deco, "lantern_stone_b", Vector2(212, -372), 50.0)
+	GlowLight.attach(deco, Vector2(212, -409), GlowLight.WARM_STONE, 118.0, 0.50, 0.12)
 	_deco(deco, "bonsai_d", Vector2(215, -318), 52.0)
 
 	# ── Bea's room (east) — scrolls flank her arched window (x[579,661]) ──
@@ -720,22 +811,20 @@ func _deco_collide(parent: Node, pos: Vector2, r: float) -> void:
 	parent.add_child(body)
 
 
-# Two-frame flickering hanging paper lantern (lantern_paper_f0/f1).
+# Hanging paper lantern. Run 163 — this used to swap between lantern_paper_f0
+# and _f1 on a 0.65s Timer, which read as the texture popping between two
+# different lanterns rather than as a flame. LOCK: the SPRITE IS STATIC. The
+# "flicker" is a real PointLight2D (GlowLight) breathing its energy, and the
+# halo that used to be baked into the PNG as a khaki disc was stripped out of
+# lantern_paper_f0.png in the same run. See scripts/GlowLight.gd.
 func _hang_paper_lantern(parent: Node, foot: Vector2, world_h: float) -> void:
 	var spr: Sprite2D = _deco(parent, "lantern_paper_f0", foot, world_h)
 	if spr == null:
 		return
-	var alt: ImageTexture = _art_tex("lantern_paper_f1")
-	if alt == null:
-		return
-	var base: ImageTexture = spr.texture
-	var t := Timer.new()
-	t.wait_time = 0.65
-	t.autostart = true
-	t.timeout.connect(func() -> void:
-		if is_instance_valid(spr):
-			spr.texture = alt if spr.texture == base else base)
-	spr.add_child(t)
+	# NOTE: parented to `parent`, NOT to `spr` — decor sprites carry a scale
+	# and a light under one would inherit it (halo silently shrinks).
+	GlowLight.attach(parent, foot + Vector2(0.0, -world_h * 0.52),
+		GlowLight.WARM_PAPER, 158.0, 0.76, 0.16)
 
 
 func _on_bed_entered(body: Node, bucket: Array) -> void:
@@ -791,7 +880,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _leave_to_town() -> void:
 	_leaving = true
 	RunState.day_spawn_hint = "from_dojo"
-	print("[Dojo] Stepping out to the Town Square.")
+	Log.dbg("[Dojo] Stepping out to the Town Square.")
 	FX.fade_to_black(0.4, 0.05, 1.0, Callable(self, "_goto_town_square"))
 
 
@@ -857,6 +946,10 @@ func _show_dream_choice(controlled: Node, prompt: Label) -> void:
 	var nav := preload("res://scripts/MenuFocusNav.gd").new()
 	_choice_layer.add_child(nav)
 	nav.buttons = [world_btn, arena_btn, cancel_btn]
+	# B / Esc backs out — same as choosing "Stay awake".
+	nav.on_cancel = func():
+		_close_choice()
+		_sleeping = false
 
 	world_btn.pressed.connect(func():
 		RunState.dream_world_mode = true

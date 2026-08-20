@@ -74,6 +74,12 @@ const BOON_FONT_SIZE:    int   = 12
 const SHINO_BOON_COL:    Color = Color(1.00, 0.87, 0.32, 1.0)   # warm gold
 const BEA_BOON_COL:      Color = Color(0.78, 0.58, 1.00, 1.0)   # lavender
 const BOON_BG_COL:       Color = Color(0.04, 0.03, 0.08, 0.42)  # dark navy tint
+# Run 166 — washi ofuda chips for the active-boon rails.
+const BOON_CHIP_PAPER:   Color = Color(0.90, 0.83, 0.66, 0.96)   # aged washi
+const BOON_CHIP_PAPER_HL:Color = Color(1.00, 0.93, 0.72, 0.99)   # brighter on inspect
+const BOON_CHIP_BORDER:  Color = Color(0.11, 0.09, 0.08, 0.85)   # sumi ink keyline
+const BOON_CHIP_INK:     Color = Color(0.12, 0.10, 0.08, 1.0)    # boon name on paper
+const BOON_CHIP_HL_EDGE: Color = Color(0.96, 0.82, 0.35, 1.0)    # cinnabar-gold focus edge
 
 var _shino_boon_panel: VBoxContainer = null   # repopulated on refresh
 var _bea_boon_panel:   VBoxContainer = null
@@ -269,6 +275,12 @@ func refresh_coin_counter() -> void:
 
 func _ready() -> void:
 	add_to_group("hud")   # lets BoonOffer find us via get_nodes_in_group("hud")
+	# Run 164 — "Ink & Washi" reskin. This only DECORATES the existing nodes:
+	# it hangs a wooden 9-slice frame behind each bar track and lays a colourless
+	# pixel-gloss overlay on each fill. Every size/colour tween below (boss phase
+	# recolours, break-bar flash, guard tint) keeps working untouched, because
+	# the gloss is alpha-only and rides on top of whatever colour is set.
+	UISkin.skin_hud(self)
 	_build_coin_counter()
 	_build_combo_gauges()
 	# Run 39 — keep processing while the tree is paused so boon-inspect mode
@@ -403,9 +415,9 @@ func _make_side_panel(right_side: bool) -> Panel:
 	hdr_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.add_child(hdr_bar)
 
-	# Character name inside the header bar.
+	# Character name inside the header bar. Run 166 — pair with 恩恵 ("boon").
 	var hdr_lbl := Label.new()
-	hdr_lbl.text = "BEA" if right_side else "SHINO"
+	hdr_lbl.text = ("BEA 恩恵" if right_side else "SHINO 恩恵")
 	hdr_lbl.add_theme_font_size_override("font_size", 11)
 	hdr_lbl.add_theme_color_override("font_color", Color(accent.r, accent.g, accent.b, 0.85))
 	hdr_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.90))
@@ -464,40 +476,78 @@ func _populate_boon_column(panel: VBoxContainer, boon_set: Dictionary, col: Colo
 		var b:   Dictionary = RunState.BOON_POOL.get(boon_id, {})
 		var nm:  String     = b.get("name", boon_id)
 		var lvl: int        = RunState.get_boon_level(boon_id)
+		var fam: String     = String(b.get("family", ""))
+		var fam_col: Color  = RunState.FAM_COLOR.get(fam, col)
+		# Level numeral in the element colour, darkened so it reads on the washi.
+		var lvl_col: Color  = fam_col.lerp(Color(0.12, 0.09, 0.07), 0.32)
 
-		# Name — clips if too wide for the narrow column.
+		# Run 166 — washi ofuda chip: name (ink) left, Roman-numeral level right.
+		var chip := Panel.new()
+		chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		chip.custom_minimum_size = Vector2(0, 22)
+		chip.add_theme_stylebox_override("panel", _boon_chip_style(false))
+		panel.add_child(chip)
+
+		var row := HBoxContainer.new()
+		row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		row.offset_left = 6; row.offset_right = -5
+		row.offset_top = 1;  row.offset_bottom = -1
+		row.add_theme_constant_override("separation", 4)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		chip.add_child(row)
+
 		var nm_lbl := Label.new()
 		nm_lbl.text = nm
 		nm_lbl.add_theme_font_size_override("font_size", BOON_FONT_SIZE)
-		nm_lbl.add_theme_color_override("font_color", Color(col.r, col.g, col.b, 0.88))
-		nm_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.90))
-		nm_lbl.add_theme_constant_override("outline_size", 3)
-		nm_lbl.clip_text   = true
+		nm_lbl.add_theme_color_override("font_color", BOON_CHIP_INK)
+		nm_lbl.add_theme_constant_override("outline_size", 0)
+		nm_lbl.clip_text = true
+		nm_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nm_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		nm_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		nm_lbl.custom_minimum_size = Vector2(BOON_PANEL_W - 10, 0)
-		panel.add_child(nm_lbl)
-		rows.append({ "id": boon_id, "nm": nm_lbl, "col": col })
+		row.add_child(nm_lbl)
 
-		# Level pip row (up to 5 filled / empty circles).
-		var pip_row := HBoxContainer.new()
-		pip_row.add_theme_constant_override("separation", 3)
-		pip_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		for i in range(1, 6):
-			var pip := Label.new()
-			pip.text = "●" if i <= lvl else "○"
-			pip.add_theme_font_size_override("font_size", 9)
-			var pip_alpha: float = 0.90 if i <= lvl else 0.25
-			pip.add_theme_color_override("font_color", Color(col.r, col.g, col.b, pip_alpha))
-			pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			pip_row.add_child(pip)
-		panel.add_child(pip_row)
+		var lvl_lbl := Label.new()
+		lvl_lbl.text = _roman(lvl)
+		lvl_lbl.add_theme_font_size_override("font_size", 13)
+		lvl_lbl.add_theme_color_override("font_color", lvl_col)
+		lvl_lbl.add_theme_constant_override("outline_size", 0)
+		lvl_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		lvl_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(lvl_lbl)
 
-		# Thin separator between boons (not after the last one).
-		var sep := ColorRect.new()
-		sep.color = Color(col.r, col.g, col.b, 0.12)
-		sep.custom_minimum_size = Vector2(BOON_PANEL_W - 14, 1)
-		sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		panel.add_child(sep)
+		rows.append({ "id": boon_id, "nm": nm_lbl, "chip": chip, "col": fam_col })
+
+		# Small gap between chips.
+		var gap := Control.new()
+		gap.custom_minimum_size = Vector2(0, 3)
+		gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		panel.add_child(gap)
+
+
+# Run 166 — washi chip stylebox for a boon rail row (highlighted while inspected).
+func _boon_chip_style(highlight: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = BOON_CHIP_PAPER_HL if highlight else BOON_CHIP_PAPER
+	sb.border_color = BOON_CHIP_HL_EDGE if highlight else BOON_CHIP_BORDER
+	sb.set_border_width_all(2 if highlight else 1)
+	sb.set_corner_radius_all(3)
+	return sb
+
+
+# Run 166 — Roman numeral for a boon level (1..~12). 0/none → an em dash.
+func _roman(n: int) -> String:
+	if n <= 0:
+		return "—"
+	var vals: Array = [10, 9, 5, 4, 1]
+	var syms: Array = ["X", "IX", "V", "IV", "I"]
+	var out: String = ""
+	var x: int = n
+	for i in range(vals.size()):
+		while x >= vals[i]:
+			out += syms[i]
+			x -= vals[i]
+	return out
 
 
 func _hide_bea_bars() -> void:
@@ -634,13 +684,15 @@ func _make_combo_gauge(right_side: bool) -> ComboGauge:
 	g.anchor_top = 1.0;  g.anchor_bottom = 1.0
 	g.anchor_left = 1.0 if right_side else 0.0
 	g.anchor_right = g.anchor_left
-	# Equal 12px visual gap on both sides: Shino's bar content (value label)
-	# ends at x≈350; Bea's content ("HP" label) starts at vp.x-360.
+	# Run 164 — the framed bars are wider and taller than the old flat ones.
+	# A hero's cluster now occupies x 12..400 from its screen edge (the value
+	# label ends at 400), and the frames span y -120..-38. The gauge sits just
+	# outside that, vertically centred on the two-bar stack.
 	if right_side:
-		g.offset_left = -430.0;  g.offset_right = -372.0
+		g.offset_left = -482.0;  g.offset_right = -424.0
 	else:
-		g.offset_left = 362.0;   g.offset_right = 420.0
-	g.offset_top = -94.0;  g.offset_bottom = -36.0
+		g.offset_left = 424.0;   g.offset_right = 482.0
+	g.offset_top = -108.0;  g.offset_bottom = -50.0
 	add_child(g)
 	g.set_count(0)
 	return g
@@ -886,15 +938,13 @@ func _inspect_step(dir: int) -> void:
 
 # Re-applies highlight + tooltip onto current rows. Safe to call repeatedly.
 func _inspect_apply() -> void:
-	# Clear any previous highlight on BOTH columns.
+	# Run 166 — highlight the washi CHIP (not the ink text), so the boon name
+	# stays legible on paper while a gold edge marks the inspected row.
 	for side_rows in [_shino_rows, _bea_rows]:
 		for r in side_rows:
-			var l: Label = r["nm"]
-			if not is_instance_valid(l):
-				continue
-			l.remove_theme_stylebox_override("normal")
-			var c: Color = r["col"]
-			l.add_theme_color_override("font_color", Color(c.r, c.g, c.b, 0.88))
+			var chip: Panel = r.get("chip", null)
+			if is_instance_valid(chip):
+				chip.add_theme_stylebox_override("panel", _boon_chip_style(false))
 
 	var rows: Array = _inspect_rows()
 	if rows.is_empty():
@@ -903,17 +953,11 @@ func _inspect_apply() -> void:
 		return
 	_inspect_idx = clampi(_inspect_idx, 0, rows.size() - 1)
 	var row: Dictionary = rows[_inspect_idx]
+	var sel_chip: Panel = row.get("chip", null)
+	if is_instance_valid(sel_chip):
+		sel_chip.add_theme_stylebox_override("panel", _boon_chip_style(true))
 	var nm_lbl: Label = row["nm"]
-	if is_instance_valid(nm_lbl):
-		var c: Color = row["col"]
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(c.r, c.g, c.b, 0.22)
-		sb.border_width_left = 2
-		sb.border_color = c
-		sb.content_margin_left = 4.0
-		nm_lbl.add_theme_stylebox_override("normal", sb)
-		nm_lbl.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	_build_inspect_tooltip(String(row["id"]), nm_lbl)
+	_build_inspect_tooltip(String(row["id"]), nm_lbl if is_instance_valid(nm_lbl) else null)
 
 
 # Builds (or rebuilds) the tooltip panel next to the inspected column.
@@ -1001,7 +1045,7 @@ func _build_inspect_tooltip(boon_id: String, anchor_lbl: Label) -> void:
 		vb.add_child(desc)
 
 	var hint := Label.new()
-	hint.text = "W/S browse  •  Esc/Tab close"
+	InputGlyphs.bind_label(hint, "{menu_nav} browse  •  {cancel} close")   # Run 158
 	hint.add_theme_font_size_override("font_size", 10)
 	hint.add_theme_color_override("font_color", Color(0.55, 0.52, 0.48, 1.0))
 	vb.add_child(hint)

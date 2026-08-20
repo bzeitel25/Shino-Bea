@@ -23,7 +23,7 @@ var _victory_started: bool = false
 
 
 func _ready() -> void:
-	print("[Boss2Arena] _ready — spawning Triheaded Wyrm.")
+	Log.dbg("[Boss2Arena] _ready — spawning Triheaded Wyrm.")
 	if get_node_or_null("/root/FX") and FX.has_method("fade_from_black"):
 		FX.fade_from_black(0.45)
 	call_deferred("_spawn_boss")
@@ -66,7 +66,7 @@ func _on_boss_killed() -> void:
 		return
 	_victory_started = true
 	# Run 43 — no spark in training mode (Dream World mini-bosses/bosses drop them).
-	print("[Boss2Arena] Triheaded Wyrm defeated — transitioning to RunComplete.")
+	Log.dbg("[Boss2Arena] Triheaded Wyrm defeated — transitioning to RunComplete.")
 	if banner_label:
 		banner_label.text = "✦ VICTORY ✦"
 		banner_label.modulate = Color(1.0, 0.92, 0.40, 1.0)

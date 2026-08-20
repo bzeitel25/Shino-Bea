@@ -1,8 +1,50 @@
-[gd_scene format=3 uid="uid://bbjm0hqqm3kmc"]
+[gd_scene load_steps=12 format=3 uid="uid://bbjm0hqqm3kmc"]
 
-[ext_resource type="Script" uid="uid://dep6e11li6qnn" path="res://scripts/MainMenu.gd" id="1_menu"]
+; ============================================================
+; MainMenu.tscn — Run 164 "Ink & Washi" rebuild
+; ============================================================
+; Structure only. Every colour, font, stylebox and seal is applied
+; at runtime by UISkin.skin_main_menu() so there is exactly one
+; source of truth for the look (scripts/ui/UISkin.gd).
+;
+; Node names MainMenu.gd depends on are unchanged:
+;   CenterStack/StartButton · CenterStack/ControlsButton
+;   CenterStack/QuitButton  · ControlsOverlay/Panel/CloseButton
+;   ControlsOverlay/Panel/OverlayTitle · .../ControlsBody
+; ============================================================
 
-[node name="MainMenu" type="Control" unique_id=223690441]
+[ext_resource type="Script" path="res://scripts/MainMenu.gd" id="1_menu"]
+[ext_resource type="Texture2D" path="res://Assets/UI/rod.png" id="2_rod"]
+[ext_resource type="Texture2D" path="res://Assets/UI/rod_bottom.png" id="3_rodb"]
+[ext_resource type="Texture2D" path="res://Assets/UI/torii.png" id="4_torii"]
+[ext_resource type="Texture2D" path="res://Assets/UI/ink_splat.png" id="5_splat"]
+[ext_resource type="Texture2D" path="res://Assets/UI/noise_overlay.png" id="6_noise"]
+[ext_resource type="Texture2D" path="res://Assets/UI/divider.png" id="7_div"]
+
+[sub_resource type="Gradient" id="Gradient_sky"]
+offsets = PackedFloat32Array(0, 0.46, 1)
+colors = PackedColorArray(0.031, 0.039, 0.071, 1, 0.067, 0.078, 0.122, 1, 0.102, 0.082, 0.125, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_sky"]
+gradient = SubResource("Gradient_sky")
+width = 64
+height = 128
+fill_from = Vector2(0, 0)
+fill_to = Vector2(0, 1)
+
+[sub_resource type="Gradient" id="Gradient_moon"]
+offsets = PackedFloat32Array(0, 0.58, 0.92, 1)
+colors = PackedColorArray(0.965, 0.925, 0.816, 1, 0.886, 0.812, 0.624, 1, 0.741, 0.659, 0.486, 1, 0.741, 0.659, 0.486, 0)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_moon"]
+gradient = SubResource("Gradient_moon")
+width = 128
+height = 128
+fill = 1
+fill_from = Vector2(0.5, 0.5)
+fill_to = Vector2(1, 0.5)
+
+[node name="MainMenu" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -11,170 +53,272 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_menu")
 
-[node name="BackgroundDark" type="ColorRect" parent="." unique_id=1830234502]
-layout_mode = 0
+; ── Night sky ────────────────────────────────────────────────
+[node name="Sky" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0.04, 0.03, 0.06, 1)
+mouse_filter = 2
+texture = SubResource("GradientTexture2D_sky")
+expand_mode = 1
+stretch_mode = 0
 
-[node name="BackgroundGradient" type="ColorRect" parent="." unique_id=136588471]
-layout_mode = 0
+[node name="Moon" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
 anchor_right = 1.0
-anchor_bottom = 1.0
-color = Color(0.08, 0.06, 0.12, 0.55)
+offset_left = -282.0
+offset_top = 70.0
+offset_right = -96.0
+offset_bottom = 256.0
+mouse_filter = 2
+modulate = Color(1, 1, 1, 0.34)
+texture = SubResource("GradientTexture2D_moon")
+expand_mode = 1
+stretch_mode = 0
 
-[node name="VignetteTop" type="ColorRect" parent="." unique_id=41443096]
-layout_mode = 0
-anchor_right = 1.0
-offset_bottom = 220.0
-color = Color(0, 0, 0, 0.35)
-
-[node name="VignetteBottom" type="ColorRect" parent="." unique_id=982782051]
-layout_mode = 0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -160.0
-color = Color(0, 0, 0, 0.45)
-
-[node name="TitleLabel" type="Label" parent="." unique_id=68168816]
-layout_mode = 0
-offset_top = 90.0
-offset_right = 1280.0
-offset_bottom = 200.0
-theme_override_colors/font_color = Color(0.96, 0.82, 0.32, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.85)
-theme_override_constants/shadow_offset_x = 3
-theme_override_constants/shadow_offset_y = 3
-theme_override_font_sizes/font_size = 84
-text = "SHINO  &  BEA"
-horizontal_alignment = 1
-
-[node name="SubtitleLabel" type="Label" parent="." unique_id=969911463]
-layout_mode = 0
-offset_top = 200.0
-offset_right = 1280.0
-offset_bottom = 240.0
-theme_override_colors/font_color = Color(0.78, 0.72, 0.85, 0.9)
-theme_override_font_sizes/font_size = 22
-text = "ninja roguelike prototype"
-horizontal_alignment = 1
-
-[node name="VersionLabel" type="Label" parent="." unique_id=39671833]
-layout_mode = 0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -200.0
-offset_top = -28.0
-offset_right = -16.0
-offset_bottom = -8.0
-theme_override_colors/font_color = Color(0.5, 0.5, 0.6, 0.7)
-theme_override_font_sizes/font_size = 12
-text = "Run 23 build — 2026-06-01"
-horizontal_alignment = 2
-
-[node name="CenterStack" type="VBoxContainer" parent="." unique_id=1917405963]
-layout_mode = 0
+[node name="Torii" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -170.0
-offset_top = -20.0
-offset_right = 170.0
+offset_left = -520.0
+offset_top = -264.0
+offset_right = 520.0
+offset_bottom = 376.0
+mouse_filter = 2
+modulate = Color(1, 1, 1, 0.3)
+texture = ExtResource("4_torii")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="InkSplatLeft" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -40.0
+offset_top = -250.0
+offset_right = 240.0
+offset_bottom = 30.0
+mouse_filter = 2
+modulate = Color(1, 1, 1, 0.45)
+texture = ExtResource("5_splat")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="InkSplatRight" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -220.0
+offset_top = -40.0
+offset_right = 40.0
 offset_bottom = 220.0
-theme_override_constants/separation = 18
+mouse_filter = 2
+modulate = Color(1, 1, 1, 0.35)
+texture = ExtResource("5_splat")
+expand_mode = 1
+stretch_mode = 5
+flip_v = true
+
+[node name="PaperWash" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+modulate = Color(1, 1, 1, 0.4)
+texture = ExtResource("6_noise")
+stretch_mode = 1
+
+; ── The hanging scroll ───────────────────────────────────────
+[node name="ScrollFrame" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -310.0
+offset_top = -322.0
+offset_right = 310.0
+offset_bottom = 322.0
+theme_override_constants/separation = 0
+
+[node name="RodTop" type="TextureRect" parent="ScrollFrame"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("2_rod")
+stretch_mode = 1
+
+[node name="ScrollBody" type="PanelContainer" parent="ScrollFrame"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Content" type="VBoxContainer" parent="ScrollFrame/ScrollBody"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+; Three labels, not one — the title is two-tone per sibling and a single Label
+; can only carry one colour. UISkin.skin_main_menu() paints them:
+;   SHINO = deep-blue Gi + orange shadow · & = sumi ink · BEA = pink Gi + teal
+; Press Start 2P @40: 200 + 120 + 120 = 440 px inside a 528 px interior.
+[node name="TitleRow" type="HBoxContainer" parent="ScrollFrame/ScrollBody/Content"]
+layout_mode = 2
+theme_override_constants/separation = 0
 alignment = 1
 
-[node name="StartButton" type="Button" parent="CenterStack" unique_id=1892202730]
-custom_minimum_size = Vector2(340, 64)
+[node name="TitleShino" type="Label" parent="ScrollFrame/ScrollBody/Content/TitleRow"]
 layout_mode = 2
-text = "START"
+text = "SHINO"
 
-[node name="ControlsButton" type="Button" parent="CenterStack" unique_id=1374597216]
-custom_minimum_size = Vector2(340, 56)
+[node name="TitleAmp" type="Label" parent="ScrollFrame/ScrollBody/Content/TitleRow"]
+layout_mode = 2
+text = " & "
+
+[node name="TitleBea" type="Label" parent="ScrollFrame/ScrollBody/Content/TitleRow"]
+layout_mode = 2
+text = "BEA"
+
+[node name="SubtitleLabel" type="Label" parent="ScrollFrame/ScrollBody/Content"]
+layout_mode = 2
+text = "双影ノ忍  ·  the sibling shadows"
+horizontal_alignment = 1
+
+; KEEP_CENTERED, never SCALE. divider.png is a 512x18 tapered brush stroke;
+; stretching it to the panel width turned the taper into two lumps.
+[node name="Divider" type="TextureRect" parent="ScrollFrame/ScrollBody/Content"]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("7_div")
+expand_mode = 1
+stretch_mode = 3
+
+[node name="TopSpacer" type="Control" parent="ScrollFrame/ScrollBody/Content"]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="CenterStack" type="VBoxContainer" parent="ScrollFrame/ScrollBody/Content"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="StartButton" type="Button" parent="ScrollFrame/ScrollBody/Content/CenterStack"]
+custom_minimum_size = Vector2(0, 62)
+layout_mode = 2
+text = "START ADVENTURE"
+
+[node name="ControlsButton" type="Button" parent="ScrollFrame/ScrollBody/Content/CenterStack"]
+custom_minimum_size = Vector2(0, 62)
 layout_mode = 2
 text = "CONTROLS"
 
-[node name="QuitButton" type="Button" parent="CenterStack" unique_id=1780554531]
-custom_minimum_size = Vector2(340, 56)
+[node name="QuitButton" type="Button" parent="ScrollFrame/ScrollBody/Content/CenterStack"]
+custom_minimum_size = Vector2(0, 62)
 layout_mode = 2
 text = "QUIT"
 
-[node name="HintLabel" type="Label" parent="." unique_id=1868793025]
-layout_mode = 0
+[node name="BottomSpacer" type="Control" parent="ScrollFrame/ScrollBody/Content"]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="HintLabel" type="Label" parent="ScrollFrame/ScrollBody/Content"]
+layout_mode = 2
+text = "W/S choose    ENTER draw    ESC back"
+horizontal_alignment = 1
+
+[node name="RodBottom" type="TextureRect" parent="ScrollFrame"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("3_rodb")
+stretch_mode = 1
+
+; ── Chrome ───────────────────────────────────────────────────
+[node name="VersionLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 16.0
-offset_top = -32.0
-offset_right = 540.0
-offset_bottom = -10.0
-theme_override_colors/font_color = Color(0.65, 0.6, 0.75, 0.7)
-theme_override_font_sizes/font_size = 13
-text = "↑/↓ navigate   ENTER select   ESC back"
+offset_left = -320.0
+offset_top = -30.0
+offset_right = -14.0
+offset_bottom = -8.0
+mouse_filter = 2
+text = "RUN 164 BUILD"
+horizontal_alignment = 2
 
-[node name="ControlsOverlay" type="Control" parent="." unique_id=1975701302]
+; ── Controls overlay ─────────────────────────────────────────
+[node name="ControlsOverlay" type="Control" parent="."]
 visible = false
-anchors_preset = 0
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 
-[node name="DimBg" type="ColorRect" parent="ControlsOverlay" unique_id=1365723547]
-layout_mode = 0
+[node name="DimBg" type="ColorRect" parent="ControlsOverlay"]
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-color = Color(0, 0, 0, 0.7)
+color = Color(0.024, 0.02, 0.031, 0.82)
 
-[node name="Panel" type="Panel" parent="ControlsOverlay" unique_id=1475343969]
-layout_mode = 0
+[node name="Panel" type="Panel" parent="ControlsOverlay"]
+layout_mode = 1
+anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -380.0
-offset_top = -260.0
-offset_right = 380.0
-offset_bottom = 260.0
+offset_left = -390.0
+offset_top = -270.0
+offset_right = 390.0
+offset_bottom = 270.0
 
-[node name="OverlayTitle" type="Label" parent="ControlsOverlay/Panel" unique_id=1956614082]
+[node name="OverlayTitle" type="Label" parent="ControlsOverlay/Panel"]
 layout_mode = 0
-offset_left = 24.0
-offset_top = 20.0
-offset_right = 736.0
-offset_bottom = 68.0
-theme_override_colors/font_color = Color(0.96, 0.82, 0.32, 1)
-theme_override_font_sizes/font_size = 28
+offset_left = 30.0
+offset_top = 22.0
+offset_right = 750.0
+offset_bottom = 70.0
 text = "CONTROLS"
 horizontal_alignment = 1
 
-[node name="ControlsBody" type="Label" parent="ControlsOverlay/Panel" unique_id=320024289]
+[node name="ControlsBody" type="Label" parent="ControlsOverlay/Panel"]
 layout_mode = 0
-offset_left = 36.0
-offset_top = 80.0
-offset_right = 724.0
-offset_bottom = 440.0
-theme_override_colors/font_color = Color(0.88, 0.88, 0.93, 1)
-theme_override_font_sizes/font_size = 16
-text = "Movement: WASD / Left Stick
+offset_left = 46.0
+offset_top = 86.0
+offset_right = 734.0
+offset_bottom = 452.0
+text = "Movement          WASD  /  Left Stick
+Light combo  (Y)   J  /  X
+Heavy combo  (X)   K  /  Y
+Ranged       (A)   L  /  RB
+Dash         (B)   SPACE  /  A
+Charge attack      HOLD the attack button
+Ult                U  /  Right Trigger
+Swap character     Q double-tap  /  LB
+Interact / Revive  E  /  B
+Pause              ESC  /  START
 
-Light combo  (Y): J  /  X
-Heavy combo  (X): K  /  Y
-Ranged       (A): L  /  RB
-Dash         (B): SPACE  /  A button
-Charge attack:    HOLD the attack button
-Ult:              U  /  Right Trigger
-Swap character:   Q double-tap  /  LB
-Interact / Revive: E  /  B
-Pause:            ESC  /  START
+Press ESC or B to close this scroll."
 
-Press ESC or B to close this panel."
-
-[node name="CloseButton" type="Button" parent="ControlsOverlay/Panel" unique_id=1921772707]
+[node name="CloseButton" type="Button" parent="ControlsOverlay/Panel"]
 layout_mode = 0
-offset_left = 290.0
-offset_top = 460.0
-offset_right = 470.0
-offset_bottom = 500.0
+offset_left = 296.0
+offset_top = 462.0
+offset_right = 484.0
+offset_bottom = 512.0
 text = "CLOSE"

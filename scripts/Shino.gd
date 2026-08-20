@@ -32,7 +32,8 @@ const ICE = preload("res://scripts/IceField.gd")   # Frostpeak slippery-ice glid
 # ============================================================
 
 # --- Tunable stats (placeholder — balance in playtest) ---
-@export var move_speed: float = 220.0
+# move_speed moved to HeroBase (Run 157; @export, base default 220 = Shino).
+# Declaring it here as well would shadow the base member.
 # max_hp moved to HeroBase (Batch 5; @export, base default 100 = Shino).
 # current_hp moved to HeroBase (Batch 3); reset to max_hp at _ready top.
 # _last_applied_max_hp moved to HeroBase (Batch 5).
@@ -79,8 +80,27 @@ var _burrow_mound: Node2D   = null            # placeholder dirt-mound visual no
 # --- Chi (GDD §8.3.2 — universal Chi, both characters share gain rules) ---
 # MAX_CHI moved to HeroBase (Batch 5).
 # current_chi moved to HeroBase (Batch 3).
-const CHI_PER_DAMAGE_DEALT: float = 0.5    # per point of damage dealt
-const CHI_PER_DAMAGE_TAKEN: float = 1.5    # per point of damage taken (higher to reward aggression)
+# Run 168 — BASE CHI GAIN SLOWED ~40% (Bruno: "chi meter fills too fast, ult is
+# way too spammy and easy to win with"). Was 0.5 / 1.5.
+#
+# The ult costs 100 Chi, so the old rates meant a full ult every ~200 damage
+# dealt — which in a normal room is two or three combos. At 0.30 that becomes
+# ~333 damage, so an ult lands roughly once per fight instead of several times,
+# and it reads as a decision rather than a rotation button.
+#
+# The dealt:taken ratio is deliberately kept at 1:3.33 (was 1:3). Taking damage
+# still fills the meter much faster than dealing it — that is the "reward
+# aggression / comeback" arm of GDD §8.3.2 and slowing it proportionally would
+# have quietly gutted the tank-y families.
+#
+# NOTE: both rates are now routed through HeroBase._chi_award_whole(), which
+# banks the fractional remainder. Before Run 168 every award was int()-truncated
+# at the call site, so at 0.30/dmg a 3-damage tick awarded int(0.9) = ZERO Chi
+# and small hits generated nothing at all. Truncation was already eating Chi at
+# 0.5; at 0.30 it would have been a much bigger, invisible second nerf on top of
+# the intended one.
+const CHI_PER_DAMAGE_DEALT: float = 0.30   # per point of damage dealt
+const CHI_PER_DAMAGE_TAKEN: float = 1.00   # per point of damage taken (higher to reward aggression)
 
 # --- Combo Counter (GDD §8.3.1 — HUD bar counting consecutive hits) ---
 # NOTE: `combo_count` is the HUD hit-streak counter.
@@ -468,6 +488,7 @@ signal ult_fired()                              # Final Ki Blast cinematic start
 func _ready() -> void:
 	hero_id = "shino"   # HeroBase identity — per-hero RunState gating key
 	current_hp = max_hp
+	_clean_move_speed = move_speed   # Run 155 — snapshot clean base before any trap can zero it (rez restore)
 	state = State.IDLE
 	add_to_group("player")   # HUD.gd finds player via this group
 	# Status component — Bash, Vulnerable, etc. Mount as child node.
@@ -550,7 +571,7 @@ func set_player_controlled(val: bool) -> void:
 		# Run 38 — stand up from the dojo "sitting" pose when control returns.
 		if _sprite:
 			_sprite.position.y = -9.0
-	print("[Player] player_controlled = %s" % str(player_controlled))
+	Log.dbg("[Player] player_controlled = %s" % str(player_controlled))
 
 
 # ============================================================
@@ -585,13 +606,60 @@ func _physics_process(delta: float) -> void:
 	# free-attacking the stunned boss). The ONLY input read is the ult button,
 	# which queues the future double-ult (wiring per GDD notes — flag only).
 	var _my_ult_id: String = "bea" if is_in_group("bea") else "shino"
+	# Run 158 — drop a stale freeze before we honour it (see RunState.validate_ult_freeze).
+	RunState.validate_ult_freeze()
 	if RunState.ult_freeze_caster != "" and RunState.ult_freeze_caster != _my_ult_id \
 	and state != State.DOWNED:
 		velocity = Vector2.ZERO
 		_was_ult_frozen = true
-		if player_controlled and _act_jp("ult"):
+		# ------------------------------------------------------------------
+		# Run 168 — DUO WINDOW IS THE SPLASH, AND ONLY THE SPLASH.
+		# ------------------------------------------------------------------
+		# Pressing ult here with a full meter converts the partner's solo ult
+		# into the combined one — but ONLY while their splash frame is still on
+		# screen (RunState.ult_splash_active) and the ult has not locked in yet.
+		#
+		# Before Run 168 this had no timing gate at all: the partner could hijack
+		# an ult that was already three spins into its attack animation. That
+		# tore the game in half — the solo coroutine would bail mid-sequence
+		# while DuoUlt started tweening the same two heroes from wherever they
+		# happened to be standing — and it is the direct cause of the frozen-Bea
+		# states in Bruno's report. Once the animation starts, the ult belongs to
+		# the ninja who cast it. Full stop.
+		if player_controlled and _act_jp("ult") \
+		and RunState.ult_splash_active and not RunState.ult_locked_in \
+		and not RunState.duo_ult_active \
+		and current_chi >= max(1, int(round(float(ULT_CHI_COST) * RunState.tide_master_ult_cost_mult(_my_ult_id)))):
 			RunState.double_ult_queued = true
 			FX.spawn_hit_particles(global_position, Color(1.0, 0.9, 0.3, 0.9), 6)
+			DuoUlt.request()
+		return
+	# ------------------------------------------------------------------
+	# Run 168 — THE CASTER STANDS STILL DURING THEIR OWN SPLASH.
+	# ------------------------------------------------------------------
+	# The freeze-block above only pins the PARTNER (it tests "caster != me"), so
+	# without this the ninja who pressed ult would keep taking input, walking and
+	# swinging for the whole ~2s splash while their own portrait filled half the
+	# screen. Bruno's requirement is "during ult, ALL action is frozen for the
+	# animation" — that has to include the person who started it.
+	#
+	# Returning here also parks _tick_timers(), so i-frame / charge / combo
+	# windows do not silently burn down behind the splash frame.
+	#
+	# THE ONE INPUT STILL READ IS ULT — the 1-PLAYER duo path. With a single pad,
+	# the SAME player presses ult again during the splash to pull their AI
+	# partner into the combined ult. This has to be handled HERE rather than
+	# further down the function: everything below this block is unreachable while
+	# the splash is up, so a 1P duo check placed after it can never fire. (It was
+	# briefly written that way and was silently dead code — the 2P path worked
+	# because the partner is caught by the freeze-block ABOVE this one.)
+	if RunState.ult_splash_active:
+		velocity = Vector2.ZERO
+		if not RunState.two_player and player_controlled \
+		and state == State.ULT_CASTING \
+		and not RunState.ult_locked_in and not RunState.duo_ult_active \
+		and RunState.ult_freeze_caster == "shino" and _act_jp("ult"):
+			DuoUlt.request()
 		return
 	# Run 151 — Post-freeze cleanup: if this hero was frozen by the partner's
 	# ult and is now unfrozen, cancel any charge whose button release was missed
@@ -606,6 +674,8 @@ func _physics_process(delta: float) -> void:
 				_cancel_charge()
 		pending_charge_type = AttackType.NONE
 		pending_charge_timer = 0.0
+	# (Run 168 — the 1P self-duo check moved UP into the splash block above; it is
+	# unreachable from here, because the splash block returns before this line.)
 	_tick_timers(delta)
 	# Run 13 — DOWNED takes priority over everything except the rez-bar tick.
 	# The downed body doesn't move, doesn't take input, doesn't auto-defend.
@@ -899,6 +969,10 @@ func _tick_ingrained_and_absorb(delta: float) -> void:
 
 func _tick_corrupt_boons(delta: float) -> void:
 	# Run 130 — Marksman's Eye: every 5s Mark the highest-HP enemy on screen.
+	# Run 156 — team_has is CORRECT here and only here: the mark is shared world
+	# state and _marksman_retarget() lives on Shino, so this tick must run when
+	# EITHER ninja owns the boon or Bea's copy would never place a mark. The
+	# benefit sites (guaranteed crit / +30% dmg) are per-hero gated instead.
 	if RunState.team_has("marksmans_eye"):
 		_marksman_timer -= delta
 		if _marksman_timer <= 0.0:
@@ -936,7 +1010,8 @@ func _tick_corrupt_boons(delta: float) -> void:
 				var d: float = e.global_position.distance_to(global_position)
 				if RunState.shino_has("corrupt_banana") and d <= 120.0:
 					if e.has_method("take_damage"):
-						e.take_damage(max(1, int(round(3.0 * RunState.lightning_damage_mult))), Vector2.ZERO)
+						# Run 156 — Tailwind's GL arm ("lightning dmg instead of dodge").
+						e.take_damage(max(1, int(round(3.0 * RunState.lightning_damage_mult * RunState.get_tailwind_lightning_mult("shino")))), Vector2.ZERO)
 					if e.has_node("StatusComponent"):
 						e.get_node("StatusComponent").apply("bash", 0.2, 1)
 				if RunState.shino_has("corrupt_onion") and d <= 200.0:
@@ -1141,7 +1216,18 @@ func _handle_input(_delta: float) -> void:
 	# Check the dash input BEFORE the action_lock early-return so Bash,
 	# Frozen, Stagger and any future action-locking status cannot remove
 	# the player's escape option. Per Combat_Boons §8 status taxonomy.
-	if _act_jp("dash") and state != State.DASHING and state != State.BURROWING and dash_charges > 0:
+	# Run 168 — ULT_CASTING added to the exclusion list. The "dash always works"
+	# rule exists so a CC status can never remove the player's escape option; it
+	# was never meant to let you cancel your OWN ultimate. Because this check sits
+	# above the `state == ULT_CASTING` early-return further down, dashing mid-beam
+	# set state = DASHING while _run_shino_ult()'s coroutine kept going: its pulse
+	# loop `break`s (it does not return), so the tail still ran — _do_ult_dizzy()
+	# tween-teleported Shino back toward his pre-dash position while the dash was
+	# driving him the other way, and the tail then unconditionally wrote
+	# state = IDLE ~1.5s later, cancelling whatever he was doing by then. Bea has
+	# no equivalent hole; her input match returns early on BEA_ULT_CASTING.
+	if _act_jp("dash") and state != State.DASHING and state != State.BURROWING \
+	and state != State.ULT_CASTING and dash_charges > 0:
 		# Run 112 — Shino-unique: dashing while his X is FULLY charged unleashes
 		# the X spinning-crane AoE as a travelling whirlwind along the dash path,
 		# hitting everything he passes (instead of wasting the charge). Other
@@ -1476,7 +1562,9 @@ func _gain_chi_from_damage_taken(adjusted: int) -> void:
 	var chi_cap: int = get_effective_max_chi()
 	var _cw_mult: float = 0.5 if RunState.shino_has("corrupt_watermelon") else 1.0
 	_cw_mult *= (1.0 + RunState.get_poison_apple_conversion_pct("shino"))   # Run 139
-	current_chi = min(chi_cap, current_chi + int(CHI_PER_DAMAGE_TAKEN * adjusted * _cw_mult))
+	# Run 168 — banked through _chi_award_whole so the fraction isn't truncated away.
+	current_chi = min(chi_cap, current_chi
+		+ _chi_award_whole(CHI_PER_DAMAGE_TAKEN * float(adjusted) * _cw_mult))
 	emit_signal("chi_changed", current_chi, chi_cap)
 
 # Combat teardown when Shino is downed (drops fist combo + charge aim-line).
@@ -1699,6 +1787,11 @@ func _release_charge() -> void:
 			AttackType.X: body_anim.set_anim_state("swing_x")
 			AttackType.A: body_anim.set_anim_state("swing_a")
 	emit_signal("charge_released", atk)
+	# Phase 6a haptics — the release thump. Fires on RELEASE rather than on
+	# connect so a charged attack has its own recognisable feel even before it
+	# reaches anything (Bruno's spec 2026-08-01). The ki-beam and every other
+	# Shino charge route through here.
+	FX.charge_rumble("shino", false)
 	match atk:
 		AttackType.Y:
 			_start_punch_flurry()
@@ -1762,7 +1855,7 @@ func _start_punch_flurry() -> void:
 	_y_charge_target = null
 	# Big Broccoli: scale the melee hitbox for the flurry duration.
 	if melee_hitbox_shape and melee_hitbox_shape.shape is RectangleShape2D:
-		var bb: float = RunState.get_big_broccoli_aoe_mult() * RunState.get_fury_release_area_mult("shino")
+		var bb: float = RunState.get_big_broccoli_aoe_mult("shino") * RunState.get_fury_release_area_mult("shino")
 		melee_hitbox_shape.shape.size = Vector2(40, 36) * bb
 	state = State.FLURRYING
 	_flurry_phase = 0
@@ -1888,6 +1981,7 @@ func _deal_flurry_tick() -> void:
 		var final_dmg: int = _scale_damage(base_dmg, is_final, false, body, "charge")
 		var was_alive: bool = (not body.has_method("is_alive")) or body.is_alive()
 		body.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
+		FX.hit_rumble("shino")
 		body.take_damage(final_dmg, knockback_dir)
 		_on_hit_connected(final_dmg)
 		_apply_melee_lifesteal(final_dmg)
@@ -2035,6 +2129,17 @@ func _try_start_attack(attack_type: int) -> void:
 	_perform_attack_swing()
 
 
+# combat-SFX: per-swing sequence so a whiff only fires when THIS swing hit nothing.
+var _swing_seq: int = 0
+var _swing_hit_seq: int = -1
+
+
+func _check_melee_whiff(seq: int) -> void:
+	# Only whiff if THIS swing (seq) never registered a hit.
+	if _swing_hit_seq != seq:
+		FX.play_sound("melee_whiff", 0.8)
+
+
 func _perform_attack_swing() -> void:
 	# Run 150b — Vine Lash (Grape B, holder-only): the FIRST attack within
 	# 0.5s of a dash lashes 3 bonus vines in a cone. Pure bonus damage — no
@@ -2044,6 +2149,11 @@ func _perform_attack_swing() -> void:
 		_vine_lash_window = 0.0
 		_fire_vine_lash()
 	state = State.ATTACKING
+	# combat-SFX: arm whiff detection for melee swings (Y/X). If nothing is hit
+	# before the swing window elapses, _check_melee_whiff plays melee_whiff.
+	if current_attack == AttackType.Y or current_attack == AttackType.X:
+		_swing_seq += 1
+		get_tree().create_timer(0.18).timeout.connect(_check_melee_whiff.bind(_swing_seq))
 	# Run 131 — One Big Grape (corrupt_grape): pin every Y/X swing to its combo
 	# finisher step. This makes the finisher ANIMATION play, sets the finisher
 	# hitbox profile, and — because the is_finisher hit check reads combo_step ==
@@ -2321,8 +2431,9 @@ func _apply_melee_aim_snap() -> void:
 
 func _fire_ki_blast(override_dir: Vector2 = Vector2.ZERO, continuous: bool = false) -> void:
 	if projectile_scene == null:
-		print("[Player] KiBlast.tscn not loaded — skip projectile")
+		Log.dbg("[Player] KiBlast.tscn not loaded — skip projectile")
 		return
+	FX.play_sound("ki_blast_fire")   # combat-SFX: sci-fi 07 whoosh on shooting a ki blast
 	# Run 60 — twin-stick supplies an explicit free-aim direction (no assist);
 	# the A-button path passes nothing and keeps its soft aim-assist cone.
 	var shot_dir: Vector2 = override_dir.normalized() if override_dir != Vector2.ZERO else _pick_ki_blast_aim_dir()
@@ -2583,9 +2694,9 @@ func _on_melee_hitbox_body_entered(body: Node) -> void:
 	# crit (one finisher per dash). Master Stroke duo keeps the unconditional
 	# every-finisher guarantee.
 	if is_finisher and RunState.master_stroke_active():
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("shino")
 	elif is_finisher and RunState.shino_has("golden_carrot") and _golden_carrot_armed:
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("shino")
 		_golden_carrot_armed = false
 
 	# Run 131 — Opening Strike retired; the "first hit on a new enemy = crit" role
@@ -2593,7 +2704,7 @@ func _on_melee_hitbox_body_entered(body: Node) -> void:
 
 	# Finisher's Aim (Carrot Charge slot): +50% crit chance on all combo finishers.
 	if RunState.shino_has("finishers_aim") and is_finisher:
-		RunState.finisher_crit_chance_bonus = 0.50
+		RunState.set_finisher_crit_bonus("shino", 0.50)
 
 	# Apply boon-driven damage scaling (Heavy Stalk, Stalk of Might, Hawkeye,
 	# Combo Master + Noble Rot scaling, Bunch Bonus, Apple Full Bloom).
@@ -2622,9 +2733,10 @@ func _on_melee_hitbox_body_entered(body: Node) -> void:
 	var kb_vec: Vector2 = Vector2.ZERO if current_attack == AttackType.Y else facing
 	# Run 134 — killer attribution for the universal on-death hook (fix 5).
 	body.set_meta("last_damager", "shino")
+	FX.hit_rumble("shino")
 	body.take_damage(final_dmg, kb_vec)
 	# Cluster Mastery — combo-point double-strike chance.
-	if RunState.get_cluster_mastery_double_chance(combo_count) > randf():
+	if RunState.get_cluster_mastery_double_chance(combo_count, "shino") > randf():
 		body.take_damage(final_dmg, kb_vec)
 		FX.spawn_hit_particles(body.global_position, Color(0.75, 0.45, 1.0, 0.8), 4)
 	# ── Run 27f — Corrupt + Legendary per-hit procs ─────────────────────────
@@ -2789,7 +2901,7 @@ func _on_melee_hitbox_body_entered(body: Node) -> void:
 				sc.apply("poison", 5.0, og_burst)
 		# Run 28 — Carrot+Grape "Master Stroke": combo finishers are guaranteed crits.
 		if RunState.master_stroke_active():
-			RunState.force_next_crit = true
+			RunState.arm_force_crit("shino")
 		# Run 28 — Apple+Grape "Bunch Bloom": finisher refunds 1 HP (2 at combo 30).
 		var bb_heal: int = RunState.get_bunch_bloom_finisher_heal(combo_count)
 		if bb_heal > 0:
@@ -2800,13 +2912,17 @@ func _on_melee_hitbox_body_entered(body: Node) -> void:
 
 	# Phase 7 — feel
 	var impact_pos: Vector2 = body.global_position
+	# Combat-SFX pass: kicks (X) and punches (Y/A) get distinct impact sounds.
+	# Kicks are airier (whoosh + thud); punches are a knuckle smack + low thump.
+	var _is_kick: bool = (current_attack == AttackType.X)
+	_swing_hit_seq = _swing_seq   # this swing connected → suppress its whiff
 	if is_finisher:
 		_spawn_finisher_impact(impact_pos, current_attack == AttackType.Y)
-		FX.play_sound("hit_heavy")
+		FX.play_sound("kick_heavy" if _is_kick else "hit_heavy")
 	else:
 		FX.spawn_hit_particles(impact_pos, Color(1.0, 0.85, 0.30, 1.0), 6)
 		FX.screen_shake(FX.SHAKE_LIGHT, FX.SHAKE_DUR_TINY)
-		FX.play_sound("hit_light")
+		FX.play_sound("kick_light" if _is_kick else "hit_light")
 
 
 # Run 47 — Y4 uppercut knockup: pop the enemy's rendered body up ~26px and
@@ -2947,7 +3063,11 @@ func _apply_family_statuses_on_hit(target: Node, is_primary: bool, is_heavy: boo
 						var _ss_ts: Variant = _ss_e.get("status") if _ss_e.has_method("get") else null
 						if _ss_ts != null and _ss_ts.has_method("apply"):
 							_ss_ts.apply(wet_id, wet_dur, 1)
-				_spawn_status_zone(_ss_pos, 56.0, 3.0, "chilled", 1, Color(0.45, 0.80, 0.95, 0.45))
+				# Run 162 — the puddle moved OUT of Seed Spit and into the new
+				# Lingering Tide passive, which pools EVERY splash rather than
+				# just this one. Seed Spit is now purely splash + knockback.
+				if RunState.shino_has("lingering_tide"):
+					_spawn_status_zone(_ss_pos, 56.0, 3.0, "chilled", 1, Color(0.45, 0.80, 0.95, 0.45))
 			# Run 27f — Cold Waters corrupt: every Watermelon hit applies BOTH
 			# Soaked AND Chilled simultaneously.
 			if RunState.shino_has("corrupt_watermelon"):
@@ -3072,14 +3192,18 @@ func _apply_family_statuses_on_hit(target: Node, is_primary: bool, is_heavy: boo
 		FX.spawn_hit_particles(target.global_position, Color(0.55, 0.85, 0.30, 0.85), 3)
 
 	# --- Potato: Cracked Soil on heavy (X) only; 3 stacks → Earthbind Root ---
-	if RunState.char_family_count("shino", "Potato") > 0 and is_heavy:
+	# Run 156 — now requires the Rock Smash X slot boon, matching Bea (Run 129)
+	# and every other family here (Wet needs hydro_jab/heavy_tide, Burn needs
+	# spicy_jab/searing_strike, ...). Shino was the last ungated family.
+	if RunState.char_family_count("shino", "Potato") > 0 and is_heavy \
+	and RunState.shino_has("rock_smash"):
 		ts.apply("cracked_soil", 4.0, 1)
 		# Visual: brown dust puff on Cracked Soil application.
 		FX.spawn_hit_particles(target.global_position, Color(0.55, 0.40, 0.20, 0.80), 3)
 		if ts.get_stacks("cracked_soil") >= 3:
 			# Run 27f — Petrify (Potato Legendary): Earthbind upgrades to a 3s
 			# full Stun + Vulnerable (total action lock + damage amp).
-			if RunState.shino_has("petrify") or RunState.bea_has("petrify"):
+			if RunState.shino_has("petrify"):   # Run 156 — picker-only (was a team check)
 				ts.apply("bash", 3.0, 1)
 				ts.apply("vulnerable", 3.0, 2)
 			else:
@@ -3150,7 +3274,8 @@ func _banana_lightning_chain(primary_target: Node, dur: float) -> void:
 		if RunState.is_duo_active("banana_watermelon"):
 			ts2.apply("wet", 4.0, 1)
 		# Flat lightning tick — keeps chain feeling impactful even on low combo.
-		var tick: int = max(1, int(round(float(RunState.HULK_SMASH_BASE_DAMAGE) * BANANA_CHAIN_DMG_PCT)))
+		# Run 156 — Tailwind's GL arm ("lightning dmg instead of dodge").
+		var tick: int = max(1, int(round(float(RunState.HULK_SMASH_BASE_DAMAGE) * BANANA_CHAIN_DMG_PCT * RunState.get_tailwind_lightning_mult("shino"))))
 		if b.has_method("take_damage"):
 			b.take_damage(tick, Vector2.ZERO)
 		# Subtle blue spark FX between origin and chained body.
@@ -3281,7 +3406,9 @@ func _on_hit_connected(dmg: int) -> void:
 	# Run 27f — Cold Waters corrupt: Chi generation halved from all sources.
 	var _chi_gain_mult: float = 0.5 if RunState.shino_has("corrupt_watermelon") else 1.0
 	_chi_gain_mult *= (1.0 + RunState.get_poison_apple_conversion_pct("shino"))   # Run 139
-	current_chi = min(chi_cap, current_chi + int(CHI_PER_DAMAGE_DEALT * dmg * _chi_gain_mult))
+	# Run 168 — banked through _chi_award_whole so the fraction isn't truncated away.
+	current_chi = min(chi_cap, current_chi
+		+ _chi_award_whole(CHI_PER_DAMAGE_DEALT * float(dmg) * _chi_gain_mult))
 	emit_signal("chi_changed", current_chi, chi_cap)
 
 	# HUD combo counter increment + reset grace timer (§8.3.1)
@@ -3930,7 +4057,7 @@ func _emerge() -> void:
 			if ts.get_stacks("cracked_soil") >= 3:
 				# Run 27f — Petrify (Potato Legendary): Earthbind upgrades to a
 				# 3s full Stun + Vulnerable (total action lock + damage amp).
-				if RunState.shino_has("petrify") or RunState.bea_has("petrify"):
+				if RunState.shino_has("petrify"):   # Run 156 — picker-only (was a team check)
 					ts.apply("bash", 3.0, 1)
 					ts.apply("vulnerable", 3.0, 2)
 				else:
@@ -3977,6 +4104,7 @@ func _fire_vine_lash() -> void:
 		lashes += 1
 		var dmg: int = _scale_damage(RunState.VINE_LASH_DAMAGE, false, false, e2, "ranged")
 		e2.set_meta("last_damager", "shino")
+		FX.hit_rumble("shino")
 		e2.take_damage(dmg, ((e2 as Node2D).global_position - global_position).normalized() * 0.25)
 		_spawn_vine_visual(global_position, (e2 as Node2D).global_position, vine_col)
 		FX.spawn_hit_particles((e2 as Node2D).global_position, vine_col, 5)
@@ -4007,6 +4135,9 @@ func _fire_vine_lash() -> void:
 func _apply_flood_charge() -> void:
 	var radius: float = 96.0
 	var wet_id: String = "chilled" if RunState.melon_gelato_mode else "wet"
+	# Run 162 — Lingering Tide: the water column is a splash, so it pools.
+	if RunState.shino_has("lingering_tide"):
+		RunState._spawn_splash_puddle(global_position)
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if not is_instance_valid(e) or (e.has_method("is_alive") and not e.is_alive()):
 			continue
@@ -4288,7 +4419,7 @@ func trigger_team_game_over() -> void:
 func _handle_death() -> void:
 	# Reset the run when player dies — full vertical slice loops back to Arena1
 	# with fresh boons-cleared state. Defensive: cap to player group only.
-	print("[Player] TEAM DEFEAT — both ninjas down, no DD charges left. Resetting run.")
+	Log.dbg("[Player] TEAM DEFEAT — both ninjas down, no DD charges left. Resetting run.")
 	# Phase 7 — feel: heavy shake + dark particle burst + sound on death
 	FX.screen_shake(FX.SHAKE_HEAVY, FX.SHAKE_DUR_LONG)
 	FX.spawn_burst_particles(global_position, Color(0.85, 0.10, 0.10, 1.0), 24)
@@ -4300,60 +4431,27 @@ func _handle_death() -> void:
 	# move during the fade.
 	state = State.HURT
 	velocity = Vector2.ZERO
-	# Show a brief "you died" recap overlay, then fade-to-black, then reload.
-	_show_death_recap()
-	FX.fade_to_black(0.8, 0.25, 1.0, Callable(self, "_reload_arena1"))
+	# Phase 4 — fade to black, then hand over to the real death screen. It waits
+	# for the player instead of auto-advancing, and it owns the run teardown via
+	# RunState.finalize_defeat(). The old 1.4s label recap is gone.
+	FX.fade_to_black(0.8, 0.25, 1.0, Callable(self, "_show_death_screen"))
 
 
-func _show_death_recap() -> void:
-	# Quick run-stats overlay shown during the fade. Reads from RunState.
-	var layer := CanvasLayer.new()
-	layer.layer = 75   # below fade (80), above HUD (10)
-	var scene := get_tree().current_scene
-	if scene == null:
-		return
-	scene.add_child(layer)
-	var label := Label.new()
-	label.anchor_left = 0.5
-	label.anchor_right = 0.5
-	label.anchor_top = 0.5
-	label.anchor_bottom = 0.5
-	label.offset_left = -260.0
-	label.offset_top = -40.0
-	label.offset_right = 260.0
-	label.offset_bottom = 80.0
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 28)
-	label.modulate = Color(1.0, 0.85, 0.85, 1.0)
-	var boons_taken: int = (RunState.boons_taken.size() if "boons_taken" in RunState else 0)
-	var arenas: int = (RunState.arenas_cleared if "arenas_cleared" in RunState else 0)
-	var loops: int = (RunState.loops_completed if "loops_completed" in RunState else 0)
-	label.text = "✦  THE DREAM ENDS  ✦\n\nArenas cleared: %d   |   Boons: %d   |   Loops: %d\n\nShino awakens back at the Dojo..." % [arenas, boons_taken, loops]
-	layer.add_child(label)
-	# Auto-free the recap layer after the fade has completed.
-	# Use a Callable.bind so we capture `layer` without a multi-line lambda.
-	get_tree().create_timer(1.4).timeout.connect(Callable(self, "_free_recap_layer").bind(layer), CONNECT_ONE_SHOT)
+func _show_death_screen() -> void:
+	DeathScreen.show_for(self)
 
 
-func _free_recap_layer(layer: Node) -> void:
-	if is_instance_valid(layer):
-		layer.queue_free()
-
-
-func _reload_arena1() -> void:
-	# Run 117 — bank hidden karma from this run's boons even on DEFEAT
-	# (win OR succumb both bank, per Townsfolk §1). Must run BEFORE the
-	# save below so it persists, and before reset_run() wipes boons_taken.
-	RunState.bank_run_karma()
-	# Save meta progress (dragon_souls, sensei upgrades) before clearing run state.
-	var sm: Node = get_node_or_null("/root/SaveManager")
-	if sm and sm.has_method("save_active_slot") and sm.active_slot >= 0:
-		sm.save_active_slot()
-	RunState.reset_run()   # preserves dragon_souls + sensei_* (meta fields)
-	RunState.clear_carry()
-	RunState.clear_bea_carry()
-	get_tree().change_scene_to_file("res://scenes/Dojo.tscn")
+# Phase 4 — REMOVED: _show_death_recap(), _free_recap_layer(), _reload_arena1().
+#
+# _show_death_recap + _free_recap_layer were the 1.4-second auto-advancing
+# Label; scripts/DeathScreen.gd replaces them with a screen that waits for the
+# player and shows the full run.
+#
+# _reload_arena1's body (bank karma -> save -> reset_run -> clear carries) moved
+# VERBATIM to RunState.finalize_defeat(), because the pause menu's ABANDON RUN
+# needs the identical sequence. Duplicating it was how the ordering constraint
+# — karma and stats MUST bank before reset_run() wipes them — would eventually
+# have drifted out of sync between the two callers.
 
 
 # -------------------------------------------------------
@@ -4517,7 +4615,7 @@ func _tick_shino_auto_defend(delta: float) -> void:
 			var combo_in_progress: bool = (current_attack == AttackType.Y and combo_step >= 1 and combo_step < Y_COMBO_HITS)
 			if _shino_ai_shot_timer <= 0.0 and (combo_in_progress or (melee_chance > 0.0 and randf() < melee_chance)):
 				if not combo_in_progress:
-					print("[Shino AI T%d] Y combo start — target @%.0fpx" % [tier, best_dist])
+					Log.dbg("[Shino AI T%d] Y combo start — target @%.0fpx" % [tier, best_dist])
 				velocity = Vector2.ZERO
 				state = State.IDLE
 				_try_start_attack(AttackType.Y)
@@ -4559,7 +4657,7 @@ func _tick_shino_auto_defend(delta: float) -> void:
 		and best_dist <= SHINO_AI_SHOT_RANGE \
 		and _shino_ai_shot_timer <= 0.0 and projectile_scene != null:
 			_shino_ai_shot_timer = iv * (0.85 + randf() * 0.30)
-			print("[Shino AI T%d] ki blast @%.0fpx (iv=%.2f)" % [tier, best_dist, iv])
+			Log.dbg("[Shino AI T%d] ki blast @%.0fpx (iv=%.2f)" % [tier, best_dist, iv])
 			var proj = projectile_scene.instantiate()
 			var parent = get_parent()
 			if parent:
@@ -4785,7 +4883,7 @@ func _ai_try_dash_through_barrier_shino(goal_dir: Vector2, goal_dist: float) -> 
 	or not collider.is_in_group("dashable_barrier"):
 		return false                # first blocker is solid (a wall) — let unstick steer
 	facing = dir                    # _start_dash uses facing when there's no input
-	print("[Shino AI] Dashing through barrier to reach goal.")
+	Log.dbg("[Shino AI] Dashing through barrier to reach goal.")
 	_start_dash()
 	return true
 
@@ -4905,27 +5003,27 @@ func _scale_damage(base: int, is_finisher: bool = false, is_primary: bool = fals
 	# _atype == "ranged"); CHARGED attacks need the longer 3s idle (anti-cheese).
 	var _db_thresh: float = RunState.DRAWN_BOW_IDLE_CHARGED if _atype == "charge" else RunState.DRAWN_BOW_IDLE
 	if RunState.shino_has("drawn_bow") and _no_attack_timer >= _db_thresh:
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("shino")
 	_no_attack_timer = 0.0
 	# Run 27f — Bullseye Finale post-ult window: +25% crit chance.
 	if _bullseye_finale_window > 0.0:
-		RunState.finisher_crit_chance_bonus += 0.25
+		RunState.add_finisher_crit_bonus("shino", 0.25)
 	# Run 27 — Shocking Slip duo (Grape+Banana): Sparked/Bolted target grants
 	# +20% crit chance on this landing hit (seeded pre-roll, consumed by roll).
 	if target != null and target.has_node("StatusComponent"):
 		var _ts_pre = target.get_node("StatusComponent")
 		if _ts_pre.has("sparked") or _ts_pre.has("bolted"):
-			RunState.finisher_crit_chance_bonus += RunState.get_grape_banana_crit_bonus()
+			RunState.add_finisher_crit_bonus("shino", RunState.get_grape_banana_crit_bonus())
 		# Run 27 — Night-Vision Peel duo (Banana+Carrot): Slipped/Greased
 		# targets count as flanked — +20% crit chance on the landing hit.
 		if (_ts_pre.has("slippery") or _ts_pre.has("greased")) and RunState.is_duo_active("banana_carrot"):
-			RunState.finisher_crit_chance_bonus += 0.20
+			RunState.add_finisher_crit_bonus("shino", 0.20)
 	# Run 128 — Topshot (Carrot Legendary): first attack on every NEW enemy
 	# is a guaranteed Mega-Crit (per-enemy meta flag, per hero).
 	if RunState.shino_has("topshot") and target != null and is_instance_valid(target) \
 	and not target.has_meta("topshot_shino"):
 		target.set_meta("topshot_shino", true)
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("shino")
 	# Run 130 — Ghost Pepper: first strike from stealth applies max Burn (5).
 	if _ghost_stealthed:
 		_ghost_stealthed = false
@@ -4934,9 +5032,13 @@ func _scale_damage(base: int, is_finisher: bool = false, is_primary: bool = fals
 			target.get_node("StatusComponent").apply("burning", 3.0, 5)
 			FX.spawn_burst_particles((target as Node2D).global_position, Color(1.0, 0.45, 0.10, 0.95), 12)
 	# Run 130 — Marksman's Eye: ranged hits on the Marked target always crit.
-	if _atype == "ranged" and RunState.team_has("marksmans_eye") \
+	if _atype == "ranged" and RunState.shino_has("marksmans_eye") \
 	and target != null and is_instance_valid(target) and target.has_meta("me_marked"):
-		RunState.force_next_crit = true
+		RunState.arm_force_crit("shino")
+	# Run 157 — Heart Shot DD revive window: 100% crit chance while it runs.
+	# Must arm BEFORE the roll below, or it would prime the following hit instead.
+	if dd_crit_active():
+		RunState.arm_force_crit("shino")
 	var mult: float = RunState.get_char_damage_mult("shino") * RunState.roll_crit_mult(_atype)
 	# Run 128 — Smash Zone (Broccoli Legendary): melee-only proximity damage.
 	if (_atype == "primary" or _atype == "heavy") and target != null \
@@ -4951,16 +5053,18 @@ func _scale_damage(base: int, is_finisher: bool = false, is_primary: bool = fals
 	# Run 130 — Marksman's Eye: +30% crit damage vs the Marked target.
 	if _atype == "ranged" and RunState.last_crit_result and target != null \
 	and is_instance_valid(target) and target.has_meta("me_marked") \
-	and RunState.team_has("marksmans_eye"):
+	and RunState.shino_has("marksmans_eye"):
 		mult *= 1.30
+	# Run 156 — Potato earth-damage arms (Spud Stomp +15% Y / Rock Smash +30% X).
+	mult *= RunState.get_earth_slot_dmg_mult("shino", _atype)
 	mult *= RunState.get_combo_master_mult(combo_count, "shino")
 	mult *= RunState.get_noble_rot_mult(combo_count, is_finisher, "shino")
 	# Apple Heavy Harvest — X attacks gain up to +25% at full HP.
 	mult *= RunState.get_heavy_harvest_mult(float(current_hp) / float(max(1, get_effective_max_hp())) if not is_primary else 1.0, "shino") if not is_primary else 1.0
 	# Cluster Cascade — cross-finisher buff (+25% X primed; +50% Y primed).
 	if is_finisher:
-		mult *= RunState.get_cluster_cascade_mult(is_primary)
-		RunState.notify_cluster_cascade_finisher(is_primary)
+		mult *= RunState.get_cluster_cascade_mult(is_primary, "shino")
+		RunState.notify_cluster_cascade_finisher(is_primary, "shino")
 	# Broccoli Heavy Stalk — Y-only +15% (Run 16: pulled out of damage_mult global).
 	mult *= RunState.get_heavy_stalk_mult(is_primary, "shino")
 	# Run 27b — Potato Heavy Stance: +15% damage while Ingrained (1.5s+ still).
@@ -5008,6 +5112,8 @@ func _scale_damage(base: int, is_finisher: bool = false, is_primary: bool = fals
 	# Run 27f — Titan's Roar post-ult window: +20% all damage for 5s.
 	if _titans_roar_window > 0.0:
 		mult *= 1.20
+	# Run 157 — Green Vengeance DD revive window: +50% damage while it runs.
+	mult *= dd_damage_mult()
 	# Run 27f — Killshot (Carrot passive): crits on targets below 25% HP have
 	# a 7% chance to Super-Mega-Crit (~3× extra on top of the crit).
 	if RunState.last_crit_result and RunState.shino_has("killshot") \
@@ -5025,7 +5131,7 @@ func _scale_damage(base: int, is_finisher: bool = false, is_primary: bool = fals
 	var scaled: float = float(base) * mult
 	# Run 130 — Marksman's Eye ricochet: ranged hits on the Marked target
 	# bounce to up to 3 nearby enemies at 75% damage.
-	if _atype == "ranged" and RunState.team_has("marksmans_eye") \
+	if _atype == "ranged" and RunState.shino_has("marksmans_eye") \
 	and target != null and is_instance_valid(target) and target is Node2D \
 	and target.has_meta("me_marked"):
 		var _me_hits: int = 0
@@ -5138,7 +5244,7 @@ func _start_spinning_crane_kick() -> void:
 	crane_kick_timer = CRANE_KICK_LOCKOUT
 	velocity = Vector2.ZERO
 	if crane_kick_scene == null:
-		print("[Player] SpinningCraneKick.tscn not loaded — skip AoE")
+		Log.dbg("[Player] SpinningCraneKick.tscn not loaded — skip AoE")
 		state = State.IDLE
 		return
 	var sck = crane_kick_scene.instantiate()
@@ -5189,7 +5295,7 @@ func _start_kamehameha() -> void:
 	var aim_dir: Vector2 = _pick_kamehameha_aim_dir()
 	facing = aim_dir
 	if kamehameha_scene == null:
-		print("[Player] KamehamehaBeam.tscn not loaded — skip beam")
+		Log.dbg("[Player] KamehamehaBeam.tscn not loaded — skip beam")
 		state = State.IDLE
 		return
 	var beam = kamehameha_scene.instantiate()
@@ -5287,6 +5393,29 @@ func _can_fire_ult() -> bool:
 			return false
 
 
+# Run 158 — HeroBase override: ground truth for RunState.validate_ult_freeze().
+func is_ult_casting() -> bool:
+	return state == State.ULT_CASTING
+
+
+# Run 158 — release the partner freeze if (and only if) WE are the one holding
+# it. Called from every exit path of _run_shino_ult(), because Shino's ult is
+# coroutine-driven and never reaches the _tick_ult() release branch (ult_timer
+# stays 0.0, so that branch is dead code for him). Safe to call repeatedly.
+func _release_ult_freeze() -> void:
+	if RunState.ult_freeze_caster == ("bea" if is_in_group("bea") else "shino"):
+		RunState.ult_freeze_caster = ""
+		RunState.double_ult_queued = false
+	# Run 168 — the world-freeze is released alongside the partner-freeze, but
+	# ONLY when no other ult phase is still running. Without that guard the duo
+	# hand-off would un-freeze the arena for the few frames between the solo
+	# coroutine bailing out and DuoUlt's cinematic taking over, handing every
+	# enemy a free window mid-transition.
+	if not RunState.ult_cinematic_active():
+		UltFreeze.end()
+		RunState.ult_locked_in = false
+
+
 func _start_ult() -> void:
 	_reset_attack_combo()
 	# Tide Master: pay reduced cost, then refund 25% of base cost. (Run 150b — holder-only.)
@@ -5308,8 +5437,41 @@ func _start_ult() -> void:
 	ult_in_dizzy = false
 	velocity = Vector2.ZERO
 	emit_signal("ult_fired")
-	_apply_ult_boon_cast_effects()
 	_ult_freeze_targets.clear()
+
+	# ==================================================================
+	# Run 168 — SPLASH FIRST, ATTACK SECOND.
+	# ==================================================================
+	# The world stops HERE, before a single frame of the splash, so nothing gets
+	# a free hit during the ~2s the players spend deciding whether to combine.
+	# UltFreeze re-scans every frame (unlike the old one-shot snapshot below it),
+	# so enemies that spawn during the splash are caught too.
+	UltFreeze.begin()
+
+	# Hand off to the splash frame and WAIT. State is already ULT_CASTING and the
+	# partner-freeze is already set, so during this await:
+	#   • no input can re-enter _start_ult (state gates _can_fire_ult),
+	#   • the partner is pinned by the freeze-block but INVULNERABLE
+	#     (HeroBase.take_damage refuses everything while ult_cinematic_active),
+	#   • the partner's ult press routes to DuoUlt.request() → UltSplash.promote().
+	var outcome: String = await UltSplash.play("shino")
+
+	# Bail: something ended the ult while the splash was up — the hero went down,
+	# the room changed, RunState.reset_ult_state() ran. Do not fire the attack.
+	if state != State.ULT_CASTING or not is_inside_tree():
+		_release_ult_freeze()
+		return
+
+	# The partner joined. DuoUlt owns both ninjas from here and runs its own
+	# cinematic; Shino's solo attack must NOT also play.
+	if outcome == "duo" or RunState.duo_ult_active:
+		return
+
+	# ---- Solo it is. Now the attack actually begins. ----
+	# Boon cast payloads fire HERE rather than at press time: if this had become
+	# a duo, DuoUlt applies BOTH heroes' payloads itself, and applying them at
+	# press time meant Shino's fired twice on every duo (once here, once there).
+	_apply_ult_boon_cast_effects()
 	FX.play_sound("ult_fire", 1.2)
 	_spawn_ult_flash()
 	# Run 154 Batch 6 — Player.gd is only ever a Shino instance (it adds itself to
@@ -5331,13 +5493,15 @@ func _tick_ult(delta: float) -> void:
 			else:
 				ult_in_dizzy = false
 				state = State.IDLE
-				for e in _ult_freeze_targets:
-					if is_instance_valid(e):
-						e.process_mode = Node.PROCESS_MODE_INHERIT
+				# Run 168 — _ult_freeze_targets is now a pure DAMAGE-TARGET list;
+				# it no longer owns anyone's process_mode. UltFreeze is the single
+				# owner of the world-freeze and restores each node to its true
+				# prior mode. (Two owners writing process_mode was how enemies
+				# ended up either permanently disabled or un-frozen early during
+				# the solo→duo hand-off.)
 				_ult_freeze_targets.clear()
 				# Run 150 (Bruno fix 11) — release the partner freeze.
-				if RunState.ult_freeze_caster == ("bea" if is_in_group("bea") else "shino"):
-					RunState.ult_freeze_caster = ""
+				_release_ult_freeze()
 
 
 func _spawn_ult_flash() -> void:
@@ -5369,11 +5533,18 @@ func _spawn_ult_flash() -> void:
 # Wind-up ki aura → beam extends and sweeps CCW three full rotations →
 # Shino stumbles dizzy as the energy dissipates (flavor only, GDD §8.2.3).
 func _run_shino_ult() -> void:
-	# Freeze all enemies up front.
+	# Run 168 — build the DAMAGE-TARGET list only. The actual freezing is already
+	# done and is owned entirely by UltFreeze (started back in _start_ult, before
+	# the splash). This loop used to write process_mode itself, which made it the
+	# second owner of the same flag and produced the classic snapshot bug: an
+	# enemy that spawned after this line ran was never frozen and never restored.
+	# Building the list here (rather than in _start_ult) is still correct — it
+	# snapshots who is alive when the BEAM starts, which is what the spin damage
+	# pulses should hit.
+	_ult_freeze_targets.clear()
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if e == null or not is_instance_valid(e) or not e.has_method("take_damage"):
 			continue
-		e.process_mode = Node.PROCESS_MODE_DISABLED
 		_ult_freeze_targets.append(e)
 
 	# ---- Wind-up ----
@@ -5381,6 +5552,12 @@ func _run_shino_ult() -> void:
 	FX.screen_shake(FX.SHAKE_MEDIUM, FX.SHAKE_DUR_MED)
 	await get_tree().create_timer(SHINO_ULT_WINDUP).timeout
 	if state != State.ULT_CASTING:
+		_release_ult_freeze()   # Run 158 — never leave the partner frozen on a bail
+		return
+	if RunState.duo_ult_active:
+		# Run 168 — should be unreachable now (the duo can only be armed during
+		# the splash, which finishes before this coroutine is ever called), but
+		# kept as a floor: DuoUlt owns both heroes and the freeze from here.
 		return
 
 	# ---- Spinning beam ----
@@ -5399,7 +5576,7 @@ func _run_shino_ult() -> void:
 	for spin_i in range(SHINO_ULT_NUM_SPINS):
 		# Wait for midpoint of this spin so the hit lands when beam has ~swept past.
 		await get_tree().create_timer(pulse_interval * 0.5).timeout
-		if state != State.ULT_CASTING:
+		if state != State.ULT_CASTING or RunState.duo_ult_active:
 			break
 		for e in _ult_freeze_targets:
 			if not is_instance_valid(e):
@@ -5413,13 +5590,33 @@ func _run_shino_ult() -> void:
 			if spin_i == 0:
 				_apply_family_statuses_on_hit(e, false, false, false, false, true)
 			var was_alive: bool = (not e.has_method("is_alive")) or e.is_alive()
-			e.set_meta("last_damager", "shino"); e.take_damage(_scale_damage(ULT_BASE_DAMAGE, true), dir)   # Run 134 — killer attribution (fix 5)
+			# Run 157 — Titan's Roar arm 1 (+50% Ult damage) applied here.
+			e.set_meta("last_damager", "shino"); e.take_damage(int(round(float(_scale_damage(ULT_BASE_DAMAGE, true)) * titans_roar_ult_mult())), dir)   # Run 134 — killer attribution (fix 5)
+			FX.hit_rumble("shino", true)   # ult connect — heavy pulse
 			if was_alive and e.has_method("is_alive") and not e.is_alive():
 				_apply_charge_kill_heal()
 			FX.spawn_burst_particles(e.global_position, Color(0.30, 0.85, 1.0, 1.0), 10)
 		FX.screen_shake(FX.SHAKE_HEAVY, FX.SHAKE_DUR_SHORT)
 		# Wait the second half of this spin interval.
 		await get_tree().create_timer(pulse_interval * 0.5).timeout
+
+	# Duo-ult interrupt: bail before the normal tail. DuoUlt owns freeze release,
+	# repositioning, and the end-state for both heroes.
+	if RunState.duo_ult_active:
+		if is_instance_valid(beam_pivot):
+			beam_pivot.queue_free()
+		return
+
+	# Run 168 — the pulse loop above exits with `break` (not `return`) when the
+	# state changes, so control falls through to this tail regardless. Re-check
+	# before running any of it: the tail repositions Shino and force-sets his
+	# state, which is catastrophic if something else already owns him.
+	if state != State.ULT_CASTING:
+		if is_instance_valid(beam_pivot):
+			beam_pivot.queue_free()
+		_ult_freeze_targets.clear()
+		_release_ult_freeze()
+		return
 
 	# Beam fade-out.
 	if is_instance_valid(beam_pivot):
@@ -5432,15 +5629,21 @@ func _run_shino_ult() -> void:
 	FX.screen_shake(FX.SHAKE_ULT, FX.SHAKE_DUR_LONG)
 	await get_tree().create_timer(0.30).timeout
 
-	# Unfreeze survivors.
-	for e in _ult_freeze_targets:
-		if is_instance_valid(e):
-			e.process_mode = Node.PROCESS_MODE_INHERIT
+	# Run 168 — enemies used to be un-frozen RIGHT HERE, one line before the dizzy
+	# tail. That was its own live bug: survivors woke up and started attacking
+	# while Shino was still locked in his dizzy stumble AND the partner was still
+	# pinned by ult_freeze_caster — a free window against two players who could
+	# not respond. The world now stays stopped until _release_ult_freeze() below,
+	# which is the ult's true end-of-life. Only the target list is dropped here.
 	_ult_freeze_targets.clear()
 
 	# Dizzy stumble (GDD §8.2.3 — flavor only, no gameplay cost).
 	await _do_ult_dizzy()
 	state = State.IDLE
+	# Run 158 — THE FIX. This is the ult's real end-of-life; _tick_ult() never
+	# runs for Shino (ult_timer is pinned at 0.0 by _start_ult), so this was the
+	# missing release that left Bea frozen in place for the rest of the scene.
+	_release_ult_freeze()
 
 
 # Shared dizzy tail: brief position wobble + orbiting stars above head.
@@ -5457,6 +5660,41 @@ func _do_ult_dizzy() -> void:
 		ULT_DIZZY_DURATION * 0.60).set_trans(Tween.TRANS_SINE)
 	await get_tree().create_timer(ULT_DIZZY_DURATION).timeout
 	ult_in_dizzy = false
+
+
+# -------------------------------------------------------
+# Duo-ult hooks — called by the DuoUlt autoload (DuoUlt.gd)
+# -------------------------------------------------------
+# Current sprite frame, used as Shino's action-portrait face in the split-frame.
+func duo_ult_face_texture() -> Texture2D:
+	if _sprite and _sprite.sprite_frames:
+		return _sprite.sprite_frames.get_frame_texture(_sprite.animation, _sprite.frame)
+	return null
+
+# Drain Chi (the combined ult consumes both ninjas' meters).
+func duo_ult_spend_chi() -> void:
+	current_chi = 0
+	emit_signal("chi_changed", current_chi, get_effective_max_chi())
+
+# Restore normal control once the Duo-ult cinematic ends.
+#
+# Run 168 — this is the FULL state restoration for Shino, and it now clears
+# every field the ult touches rather than just the obvious three. The bug class
+# it guards against: a duo that starts from Shino's splash leaves his solo
+# coroutine's leftovers set (charge state, knockback, i-frames, combo lockouts),
+# and whatever isn't reset here becomes "Shino feels wrong after a duo ult".
+# Enemy un-freezing is deliberately NOT done here — UltFreeze owns that and
+# DuoUlt._cleanup() releases it once, after BOTH heroes have been restored.
+func duo_ult_finish() -> void:
+	_ult_freeze_targets.clear()
+	ult_timer = 0.0
+	ult_in_dizzy = false
+	velocity = Vector2.ZERO
+	_hit_knockback_vel = Vector2.ZERO
+	pending_charge_type = AttackType.NONE
+	pending_charge_timer = 0.0
+	_was_ult_frozen = false
+	state = State.IDLE
 
 
 # _spawn_bea_blink_flash / _spawn_bea_flourish_pulse removed (Batch 6): dead
@@ -5695,7 +5933,9 @@ func _tick_juicebox_regen(delta: float) -> void:
 
 
 func _tick_layered_defense(delta: float) -> void:
-	if not RunState.layered_defense_taken:
+	# Run 157 — picker-only. Both heroes gated on the same GLOBAL flag, so one
+	# ninja's Layered Defense gave BOTH of them the passive poison aura.
+	if not RunState.shino_has("layered_defense"):
 		return
 	if current_hp <= 0:
 		return

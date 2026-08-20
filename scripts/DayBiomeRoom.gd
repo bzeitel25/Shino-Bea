@@ -544,7 +544,7 @@ func _add_interactable(host: Node2D, kind: String, id: String, action: String) -
 	host.add_child(zone)
 
 	var prompt := Label.new()
-	prompt.text = "[E] %s" % action
+	InputGlyphs.bind_label(prompt, "[{interact}] %s" % action)   # Run 158 — live device glyph
 	prompt.add_theme_font_size_override("font_size", 14)
 	prompt.add_theme_color_override("font_color", Color(1.0, 1.0, 0.7))
 	prompt.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.0))
@@ -621,7 +621,7 @@ func _goto_town() -> void:
 func _enter_home(fam: String) -> void:
 	_busy = true
 	RunState.day_visit_family = fam
-	print("[DayBiomeRoom] Entering the %s family home." % fam)
+	Log.dbg("[DayBiomeRoom] Entering the %s family home." % fam)
 	FX.fade_to_black(0.35, 0.05, 1.0, Callable(self, "_goto_home"))
 
 

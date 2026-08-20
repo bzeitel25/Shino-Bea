@@ -39,7 +39,7 @@ func _ready() -> void:
 	# Big Broccoli: scale radius by 1.5×. Must update BOTH the physics CircleShape2D
 	# (lives in the .tscn — hardcoded 120px) AND the visual ring variable.
 	# Run 131 — Fury Release also widens the charge AoE (Shino's charge move).
-	var bb_mult: float = RunState.get_big_broccoli_aoe_mult() * RunState.get_fury_release_area_mult("shino")
+	var bb_mult: float = RunState.get_big_broccoli_aoe_mult("shino") * RunState.get_fury_release_area_mult("shino")
 	radius *= bb_mult
 	var cshape: CollisionShape2D = get_node_or_null("CollisionShape2D")
 	if cshape and cshape.shape is CircleShape2D:
@@ -148,6 +148,7 @@ func _on_body_entered(body: Node) -> void:
 
 	var was_alive: bool = (not body.has_method("is_alive")) or body.is_alive()
 	body.set_meta("last_damager", "shino")   # Run 134 — killer attribution (fix 5)
+	FX.hit_rumble("shino")
 	body.take_damage(dmg, dir)
 
 	# Run 48 — area-clear feel: heavy outward shove (override the base 200

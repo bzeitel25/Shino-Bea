@@ -266,7 +266,7 @@ func _open_ui() -> void:
 
 	var footer := Label.new()
 	footer.name = "FooterLabel"
-	footer.text = "↑↓ Navigate    E / A  Select    Y / X  Remove boon    Esc  Back / Close"
+	InputGlyphs.bind_label(footer, "{menu_nav}  Navigate     {accept}  Select     {attack_y} / {attack_x}  Remove boon     {cancel}  Back / Close")   # Run 158
 	footer.add_theme_color_override("font_color", COLOR_DIM)
 	footer.add_theme_font_size_override("font_size", 13)
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -577,7 +577,7 @@ func _grant(boon_id: String) -> void:
 				String(RunState.BOON_POOL.get(traded_out, {}).get("name", traded_out))]
 		else:
 			_flash_lbl.text = "Granted %s to %s!" % [String(b_data.get("name", boon_id)), who.capitalize()]
-	print("[BoonDispenser] Granted '%s' to %s (sandbox, traded_out='%s')" % [boon_id, who, traded_out])
+	Log.dbg("[BoonDispenser] Granted '%s' to %s (sandbox, traded_out='%s')" % [boon_id, who, traded_out])
 
 	# Stay open and refresh ownership markers so builds can be stacked fast.
 	_show_boons(_cur_family)
@@ -616,7 +616,7 @@ func _remove_current() -> void:
 	_refresh_hud_boon_panel()
 	if _flash_lbl:
 		_flash_lbl.text = "Removed %s from %s." % [bname, who.capitalize()]
-	print("[BoonDispenser] Removed '%s' from %s (sandbox)" % [boon_id, who])
+	Log.dbg("[BoonDispenser] Removed '%s' from %s (sandbox)" % [boon_id, who])
 	# Refresh the boon list to update ownership markers.
 	var saved_idx: int = _sel_idx
 	_show_boons(_cur_family)
@@ -642,7 +642,7 @@ func _reset_all_boons() -> void:
 	_refresh_hud_boon_panel()
 	if _flash_lbl:
 		_flash_lbl.text = "All %d boons wiped! Clean slate." % total
-	print("[BoonDispenser] Reset all boons (%d wiped)" % total)
+	Log.dbg("[BoonDispenser] Reset all boons (%d wiped)" % total)
 	# Refresh the family list to update the count.
 	_show_families()
 

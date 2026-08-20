@@ -44,6 +44,8 @@ func open(speaker: String, lines: Array) -> void:
 
 
 func _build_ui(speaker: String) -> void:
+	# Run 164c — apply the "Ink & Washi" skin to everything built below.
+	UISkin.skin_tree_deferred(self)
 	_panel = ColorRect.new()
 	_panel.color = Color(0.07, 0.06, 0.10, 0.92)
 	_panel.anchor_left = 0.5
@@ -99,8 +101,12 @@ func _show_line() -> void:
 	if _idx >= _lines.size():
 		_close()
 		return
-	_text_lbl.text = String(_lines[_idx])
-	_more_lbl.text = "[E] ▸" if _idx < _lines.size() - 1 else "[E] Close"
+	# Run 158 — routed through InputGlyphs so dialogue that names a button (Sensei
+	# Z's coaching lines) shows the player's actual device. Non-glyph placeholders
+	# like {hero} pass through untouched.
+	InputGlyphs.update_binding(_text_lbl, String(_lines[_idx]))
+	# Run 158 — bound so the advance glyph tracks the live input device.
+	InputGlyphs.update_binding(_more_lbl, "[{interact}] ▸" if _idx < _lines.size() - 1 else "[{interact}] Close")
 
 
 func _process(delta: float) -> void:
@@ -111,7 +117,9 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _cooldown > 0.0:
 		return
-	var advance: bool = event.is_action_pressed("interact") or event.is_action_pressed("ui_accept")
+	# B / Esc advances too (nowhere to go "back" in a linear line-by-line box).
+	var advance: bool = event.is_action_pressed("interact") or event.is_action_pressed("ui_accept") \
+		or event.is_action_pressed("ui_cancel")
 	if not advance or event.is_echo():
 		return
 	get_viewport().set_input_as_handled()

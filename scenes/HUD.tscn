@@ -7,113 +7,129 @@ script = ExtResource("1_hud")
 layer = 10
 
 ; ============================================================
-; SHINO bars — bottom-LEFT corner of screen (responsive anchors).
-; Stack order from bottom up: Combo, Chi, HP.
+; Run 164 geometry note — READ BEFORE MOVING ANYTHING
+; ============================================================
+; UISkin.frame_meter() hangs a NinePatchRect BEHIND each *BarBG,
+; grown outward by the frame margins: 12 px left/right/top and
+; 10 px bottom. So a bar's real on-screen footprint is
+;
+;     x:  BarBG.left - 12  ..  BarBG.right + 12
+;     y:  BarBG.top  - 12  ..  BarBG.bottom + 10
+;
+; The HP and Chi rows are therefore 44 px apart (not the old 26),
+; which leaves a clean 6 px gap between the two frames. The value
+; labels start 20 px clear of the frame's right edge, and the
+; caption labels end 4 px clear of its left edge.
+;
+; BarBG must stay exactly 200 px wide — HUD.gd's BAR_MAX_WIDTH.
 ; ============================================================
 
-; ── HP bar (top of Shino stack) ─────────────────────────────
+; ── SHINO — bottom-left ─────────────────────────────────────
 [node name="HPSection" type="Control" parent="."]
 anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 0.0
 anchor_bottom = 1.0
-offset_left = 10.0
-offset_top = -88.0
-offset_right = 360.0
-offset_bottom = -68.0
+offset_left = 12.0
+offset_top = -110.0
+offset_right = 400.0
+offset_bottom = -84.0
+mouse_filter = 2
 
 [node name="HPLabel" type="Label" parent="HPSection"]
 offset_left = 0.0
-offset_top = 0.0
-offset_right = 32.0
-offset_bottom = 16.0
+offset_top = 3.0
+offset_right = 40.0
+offset_bottom = 21.0
 text = "HP"
 
 [node name="HPBarBG" type="ColorRect" parent="HPSection"]
-offset_left = 36.0
-offset_top = 1.0
-offset_right = 236.0
-offset_bottom = 15.0
+offset_left = 52.0
+offset_top = 2.0
+offset_right = 252.0
+offset_bottom = 18.0
 color = Color(0.22, 0.04, 0.04, 1)
 
 [node name="HPBarFill" type="ColorRect" parent="HPSection/HPBarBG"]
 offset_left = 0.0
 offset_top = 0.0
 offset_right = 200.0
-offset_bottom = 14.0
-color = Color(0.9, 0.15, 0.15, 1)
+offset_bottom = 16.0
+color = Color(0.75, 0.16, 0.15, 1)
 
 [node name="HPValueLabel" type="Label" parent="HPSection"]
-offset_left = 240.0
-offset_top = 0.0
-offset_right = 340.0
-offset_bottom = 16.0
-theme_override_font_sizes/font_size = 12
+offset_left = 284.0
+offset_top = 3.0
+offset_right = 400.0
+offset_bottom = 21.0
 text = "100 / 100"
 
-; ── Chi bar (middle of Shino stack) ─────────────────────────
 [node name="ChiSection" type="Control" parent="."]
 anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 0.0
 anchor_bottom = 1.0
-offset_left = 10.0
-offset_top = -62.0
-offset_right = 360.0
-offset_bottom = -42.0
+offset_left = 12.0
+offset_top = -66.0
+offset_right = 400.0
+offset_bottom = -40.0
+mouse_filter = 2
 
 [node name="ChiLabel" type="Label" parent="ChiSection"]
 offset_left = 0.0
-offset_top = 0.0
-offset_right = 32.0
-offset_bottom = 16.0
+offset_top = 3.0
+offset_right = 44.0
+offset_bottom = 21.0
 text = "CHI"
 
 [node name="ChiBarBG" type="ColorRect" parent="ChiSection"]
-offset_left = 36.0
-offset_top = 1.0
-offset_right = 236.0
-offset_bottom = 15.0
-color = Color(0.04, 0.06, 0.30, 1)
+offset_left = 52.0
+offset_top = 2.0
+offset_right = 252.0
+offset_bottom = 18.0
+color = Color(0.05, 0.08, 0.30, 1)
 
 [node name="ChiBarFill" type="ColorRect" parent="ChiSection/ChiBarBG"]
 offset_left = 0.0
 offset_top = 0.0
 offset_right = 0.0
-offset_bottom = 14.0
-color = Color(0.15, 0.6, 1.0, 1)
+offset_bottom = 16.0
+color = Color(0.18, 0.58, 0.95, 1)
 
 [node name="ChiValueLabel" type="Label" parent="ChiSection"]
-offset_left = 240.0
-offset_top = 0.0
-offset_right = 340.0
-offset_bottom = 16.0
-theme_override_font_sizes/font_size = 12
+offset_left = 284.0
+offset_top = 3.0
+offset_right = 400.0
+offset_bottom = 21.0
 text = "0 / 100"
 
-; ── Combo counter bar (bottom of Shino stack, closest to corner) ─
+; ── Legacy gold combo bar. HUD.gd hides this on _ready and draws the
+; ── radial shuriken gauges instead, but the nodes must still exist:
+; ── HUD.gd binds them with `$` (non-optional).
 [node name="ComboSection" type="Control" parent="."]
+visible = false
 anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 0.0
 anchor_bottom = 1.0
-offset_left = 10.0
-offset_top = -36.0
-offset_right = 380.0
-offset_bottom = -16.0
+offset_left = 12.0
+offset_top = -34.0
+offset_right = 400.0
+offset_bottom = -12.0
+mouse_filter = 2
 
 [node name="ComboBarLabel" type="Label" parent="ComboSection"]
 offset_left = 0.0
-offset_top = 0.0
+offset_top = 2.0
 offset_right = 64.0
-offset_bottom = 16.0
+offset_bottom = 20.0
 text = "COMBO"
 
 [node name="ComboBarBG" type="ColorRect" parent="ComboSection"]
-offset_left = 68.0
-offset_top = 1.0
-offset_right = 268.0
-offset_bottom = 15.0
+offset_left = 70.0
+offset_top = 2.0
+offset_right = 270.0
+offset_bottom = 16.0
 color = Color(0.28, 0.22, 0.0, 1)
 
 [node name="ComboBarFill" type="ColorRect" parent="ComboSection/ComboBarBG"]
@@ -124,111 +140,99 @@ offset_bottom = 14.0
 color = Color(1.0, 0.85, 0.1, 1)
 
 [node name="ComboCountLabel" type="Label" parent="ComboSection"]
-offset_left = 274.0
-offset_top = -2.0
-offset_right = 330.0
-offset_bottom = 18.0
+offset_left = 278.0
+offset_top = 0.0
+offset_right = 360.0
+offset_bottom = 20.0
 text = ""
 
-; ============================================================
-; BEA bars — bottom-RIGHT corner of screen (responsive anchors).
-; No "— BEA —" divider — separation is purely spatial now.
-; Stack: HP on top, Chi below (closer to corner).
-; Section spans 350px wide ending 10px before the right edge.
-; ============================================================
-
-; ── Bea HP bar (top of Bea stack) ──────────────────────────
+; ── BEA — bottom-right, mirrored ────────────────────────────
 [node name="BeaHPSection" type="Control" parent="."]
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -360.0
-offset_top = -88.0
-offset_right = -10.0
-offset_bottom = -68.0
+offset_left = -400.0
+offset_top = -110.0
+offset_right = -12.0
+offset_bottom = -84.0
+mouse_filter = 2
 
 [node name="BeaHPLabel" type="Label" parent="BeaHPSection"]
 offset_left = 0.0
-offset_top = 0.0
-offset_right = 32.0
-offset_bottom = 16.0
+offset_top = 3.0
+offset_right = 40.0
+offset_bottom = 21.0
 text = "HP"
 modulate = Color(0.85, 0.5, 1.0, 1)
 
 [node name="BeaHPBarBG" type="ColorRect" parent="BeaHPSection"]
-offset_left = 36.0
-offset_top = 1.0
-offset_right = 236.0
-offset_bottom = 15.0
+offset_left = 52.0
+offset_top = 2.0
+offset_right = 252.0
+offset_bottom = 18.0
 color = Color(0.18, 0.06, 0.22, 1)
 
 [node name="BeaHPBarFill" type="ColorRect" parent="BeaHPSection/BeaHPBarBG"]
 offset_left = 0.0
 offset_top = 0.0
 offset_right = 200.0
-offset_bottom = 14.0
-color = Color(0.72, 0.22, 0.90, 1)
+offset_bottom = 16.0
+color = Color(0.66, 0.22, 0.86, 1)
 
 [node name="BeaHPValueLabel" type="Label" parent="BeaHPSection"]
-offset_left = 240.0
-offset_top = 0.0
-offset_right = 340.0
-offset_bottom = 16.0
-theme_override_font_sizes/font_size = 12
+offset_left = 284.0
+offset_top = 3.0
+offset_right = 400.0
+offset_bottom = 21.0
 text = "80 / 80"
 
-; ── Bea Chi bar (bottom of Bea stack, closest to corner) ───
 [node name="BeaChiSection" type="Control" parent="."]
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -360.0
-offset_top = -62.0
-offset_right = -10.0
-offset_bottom = -42.0
+offset_left = -400.0
+offset_top = -66.0
+offset_right = -12.0
+offset_bottom = -40.0
+mouse_filter = 2
 
 [node name="BeaChiLabel" type="Label" parent="BeaChiSection"]
 offset_left = 0.0
-offset_top = 0.0
-offset_right = 32.0
-offset_bottom = 16.0
+offset_top = 3.0
+offset_right = 44.0
+offset_bottom = 21.0
 text = "CHI"
 modulate = Color(0.5, 0.9, 0.85, 1)
 
 [node name="BeaChiBarBG" type="ColorRect" parent="BeaChiSection"]
-offset_left = 36.0
-offset_top = 1.0
-offset_right = 236.0
-offset_bottom = 15.0
+offset_left = 52.0
+offset_top = 2.0
+offset_right = 252.0
+offset_bottom = 18.0
 color = Color(0.04, 0.18, 0.18, 1)
 
 [node name="BeaChiBarFill" type="ColorRect" parent="BeaChiSection/BeaChiBarBG"]
 offset_left = 0.0
 offset_top = 0.0
 offset_right = 0.0
-offset_bottom = 14.0
-color = Color(0.18, 0.85, 0.78, 1)
+offset_bottom = 16.0
+color = Color(0.16, 0.78, 0.72, 1)
 
 [node name="BeaChiValueLabel" type="Label" parent="BeaChiSection"]
-offset_left = 240.0
-offset_top = 0.0
-offset_right = 340.0
-offset_bottom = 16.0
-theme_override_font_sizes/font_size = 12
+offset_left = 284.0
+offset_top = 3.0
+offset_right = 400.0
+offset_bottom = 21.0
 text = "0 / 100"
 
 ; ============================================================
-; BOSS HP bar — top-of-screen, full-width (Run 15).
-; Hidden by default; HUD.gd toggles visibility on FX bus signals
-; (boss_registered / boss_unregistered) and refreshes fill via
-; boss_hp_changed.
-;
-; Layout (top-stretch, 32px tall, 24px gap from top):
-;   [NameLabel — left]        [PctLabel + ValueLabel — right]
-;   [============== bar bg with fill ===============]
-;        [tick @ 60%]                 [tick @ 30%]
+; BOSS HP bar — top of screen, full width (Run 15).
+; Hidden by default; HUD.gd toggles it on the FX bus signals
+; (boss_registered / boss_unregistered) and refreshes the fill on
+; boss_hp_changed. UISkin frames it and stamps the 刃 seal onto the
+; name label. The breakbar (Run 117) is built under it in code.
 ; ============================================================
 [node name="BossBarSection" type="Control" parent="."]
 visible = false
@@ -236,10 +240,11 @@ anchor_left = 0.0
 anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 0.0
-offset_left = 40.0
-offset_top = 16.0
-offset_right = -40.0
-offset_bottom = 60.0
+offset_left = 56.0
+offset_top = 26.0
+offset_right = -56.0
+offset_bottom = 76.0
+mouse_filter = 2
 
 [node name="BossNameLabel" type="Label" parent="BossBarSection"]
 anchor_left = 0.0
@@ -248,25 +253,23 @@ anchor_right = 0.0
 anchor_bottom = 0.0
 offset_left = 0.0
 offset_top = -2.0
-offset_right = 320.0
-offset_bottom = 16.0
-theme_override_font_sizes/font_size = 16
+offset_right = 420.0
+offset_bottom = 22.0
 text = "Shadow Commander"
-modulate = Color(1.0, 0.85, 0.95, 1.0)
+modulate = Color(1.0, 0.9, 0.96, 1.0)
 
 [node name="BossValueLabel" type="Label" parent="BossBarSection"]
 anchor_left = 1.0
 anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 0.0
-offset_left = -220.0
+offset_left = -240.0
 offset_top = -2.0
 offset_right = 0.0
-offset_bottom = 16.0
-theme_override_font_sizes/font_size = 14
+offset_bottom = 22.0
 text = "100%  (400 / 400)"
 horizontal_alignment = 2
-modulate = Color(1.0, 0.85, 0.95, 1.0)
+modulate = Color(1.0, 0.9, 0.96, 1.0)
 
 [node name="BossBarBG" type="ColorRect" parent="BossBarSection"]
 anchor_left = 0.0
@@ -274,9 +277,9 @@ anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 0.0
 offset_left = 0.0
-offset_top = 20.0
+offset_top = 32.0
 offset_right = 0.0
-offset_bottom = 38.0
+offset_bottom = 52.0
 color = Color(0.12, 0.02, 0.04, 0.92)
 
 ; Fill stretches via anchor_right tween — see HUD.gd. Starts at 100%.
@@ -291,38 +294,39 @@ offset_right = 0.0
 offset_bottom = 0.0
 color = Color(0.78, 0.18, 0.85, 1.0)
 
-; Phase 2 tick mark @ 60% — thin vertical line on the bar.
+; Phase 2 tick mark @ 60%.
 [node name="Phase2Tick" type="ColorRect" parent="BossBarSection/BossBarBG"]
 anchor_left = 0.6
 anchor_top = 0.0
 anchor_right = 0.6
 anchor_bottom = 1.0
 offset_left = 0.0
-offset_top = -2.0
-offset_right = 2.0
-offset_bottom = 2.0
+offset_top = -3.0
+offset_right = 3.0
+offset_bottom = 3.0
 color = Color(1.0, 0.55, 0.05, 0.95)
 
-; Phase 3 tick mark @ 30% — thin vertical line on the bar.
+; Phase 3 tick mark @ 30%.
 [node name="Phase3Tick" type="ColorRect" parent="BossBarSection/BossBarBG"]
 anchor_left = 0.3
 anchor_top = 0.0
 anchor_right = 0.3
 anchor_bottom = 1.0
 offset_left = 0.0
-offset_top = -2.0
-offset_right = 2.0
-offset_bottom = 2.0
+offset_top = -3.0
+offset_right = 3.0
+offset_bottom = 3.0
 color = Color(1.0, 0.15, 0.15, 0.95)
 
-; Thin border under the bar — feel polish.
+; Kept for HUD.gd's boss_bar_border reference. The wooden frame supplies the
+; real edge now, so this sits fully transparent unless HUD.gd flashes it.
 [node name="BossBarBorder" type="ColorRect" parent="BossBarSection"]
 anchor_left = 0.0
 anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 0.0
 offset_left = 0.0
-offset_top = 38.0
+offset_top = 64.0
 offset_right = 0.0
-offset_bottom = 40.0
-color = Color(0.55, 0.05, 0.65, 0.85)
+offset_bottom = 66.0
+color = Color(0.55, 0.05, 0.65, 0.0)

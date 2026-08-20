@@ -28,6 +28,14 @@ const WALL_T: float = 32.0
 const WALL_COLOR: Color = Color(0.12, 0.09, 0.18)
 const GATE_COLOR_CLOSED: Color = Color(0.25, 0.18, 0.32)
 const GATE_COLOR_OPEN: Color = Color(0.35, 0.75, 0.55)
+# Run 159 — arena containment. The doorway opening is EXACTLY GATE_H tall, and
+# each doorway is backed by a sealed alcove, so a hero can step into the
+# threshold to press {interact} but can never walk out of the tutorial arena.
+const GATE_H: float = 64.0
+const POCKET_DEPTH: float = 50.0
+const POCKET_THICK: float = 16.0
+const SEAL_COLOR: Color = Color(0.17, 0.13, 0.24)
+const POCKET_FLOOR_COLOR: Color = Color(0.10, 0.08, 0.15)
 const SHADOW_TINT: Color = Color(0.18, 0.18, 0.18, 0.9)
 # Tutorial slime tint — near-black neutral grey, colourless shadow slimes.
 const TUTORIAL_SLIME_TINT: Color = Color(0.20, 0.20, 0.22, 1.0)
@@ -117,21 +125,65 @@ func _build_walls() -> void:
 
 	var wx: float = _half.x + WALL_T * 0.5
 	var wy: float = _half.y + WALL_T * 0.5
+	var edge: float = _half.y + WALL_T     # outer Y edge of the side walls
+	var gap: float = GATE_H * 0.5          # half the doorway opening
 
 	# Top wall — solid
 	_add_wall_segment(walls, Vector2(0, -wy), Vector2((_half.x + WALL_T) * 2, WALL_T))
 	# Bottom wall — solid
 	_add_wall_segment(walls, Vector2(0, wy), Vector2((_half.x + WALL_T) * 2, WALL_T))
-	# Left wall — solid (room 1) or with entry gap (rooms 2-5)
+
+	# Side walls. Run 159 fix: these used to leave a (_half.y * 2 - 64)px hole —
+	# 232px in room 1 — with only a 64px gate parked in the middle of it, so the
+	# player just strolled above/below the gate and out of the arena. The opening
+	# is now exactly GATE_H tall, flush with the gate body.
 	if _room == 1:
-		_add_wall_segment(walls, Vector2(-wx, 0), Vector2(WALL_T, (_half.y + WALL_T) * 2))
+		# Room 1 has no entry door — solid left wall.
+		_add_wall_segment(walls, Vector2(-wx, 0), Vector2(WALL_T, edge * 2.0))
 	else:
-		# Gap on the left for entry
-		_add_wall_segment(walls, Vector2(-wx, -wy + WALL_T * 0.5), Vector2(WALL_T, _half.y - 32))
-		_add_wall_segment(walls, Vector2(-wx, wy - WALL_T * 0.5), Vector2(WALL_T, _half.y - 32))
-	# Right wall — gap for exit gate (all rooms)
-	_add_wall_segment(walls, Vector2(wx, -wy + WALL_T * 0.5), Vector2(WALL_T, _half.y - 32))
-	_add_wall_segment(walls, Vector2(wx, wy - WALL_T * 0.5), Vector2(WALL_T, _half.y - 32))
+		_add_side_wall_with_gap(walls, -wx, edge, gap)
+		# The door you came through is SHUT behind you. Run 89/109 lock: never
+		# leave an open-looking gap plugged by an invisible wall — show the seal.
+		_build_entry_seal(walls, Vector2(-wx, 0))
+	_add_side_wall_with_gap(walls, wx, edge, gap)
+
+
+# Side wall built as two segments leaving a GATE_H-tall doorway centred on y=0.
+func _add_side_wall_with_gap(parent: Node2D, x: float, edge: float, gap: float) -> void:
+	var seg_h: float = edge - gap
+	if seg_h <= 0.0:
+		# Degenerate room — fall back to a solid wall rather than an open side.
+		_add_wall_segment(parent, Vector2(x, 0), Vector2(WALL_T, edge * 2.0))
+		return
+	_add_wall_segment(parent, Vector2(x, -(edge + gap) * 0.5), Vector2(WALL_T, seg_h))
+	_add_wall_segment(parent, Vector2(x, (edge + gap) * 0.5), Vector2(WALL_T, seg_h))
+
+
+# Solid, visible slab filling the entry doorway of rooms 2-5.
+func _build_entry_seal(parent: Node2D, center: Vector2) -> void:
+	var body := StaticBody2D.new()
+	body.name = "EntrySeal"
+	body.position = center
+	body.collision_layer = 1
+	body.collision_mask = 0
+	body.add_to_group("leap_blocker")
+
+	var vis := ColorRect.new()
+	vis.name = "Visual"
+	vis.offset_left = -WALL_T * 0.5
+	vis.offset_top = -GATE_H * 0.5
+	vis.offset_right = WALL_T * 0.5
+	vis.offset_bottom = GATE_H * 0.5
+	vis.color = SEAL_COLOR
+	body.add_child(vis)
+
+	var col := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = Vector2(WALL_T, GATE_H)
+	col.shape = shape
+	body.add_child(col)
+
+	parent.add_child(body)
 
 
 func _add_wall_segment(parent: Node2D, center: Vector2, extent: Vector2) -> void:
@@ -139,6 +191,8 @@ func _add_wall_segment(parent: Node2D, center: Vector2, extent: Vector2) -> void
 	body.position = center
 	body.collision_layer = 1
 	body.collision_mask = 0
+	# Run 110 — arena boundary; the Meteor leap must stop here too.
+	body.add_to_group("leap_blocker")
 
 	var vis := ColorRect.new()
 	vis.color = WALL_COLOR
@@ -164,33 +218,35 @@ func _build_exit_gate() -> void:
 	_gate_node.position = Vector2(wx, 0)
 	_gate_node.collision_layer = 1
 	_gate_node.collision_mask = 0
+	_gate_node.add_to_group("leap_blocker")
 
 	var vis := ColorRect.new()
 	vis.name = "Visual"
 	vis.offset_left = -WALL_T * 0.5
-	vis.offset_top = -32.0
+	vis.offset_top = -GATE_H * 0.5
 	vis.offset_right = WALL_T * 0.5
-	vis.offset_bottom = 32.0
+	vis.offset_bottom = GATE_H * 0.5
 	vis.color = GATE_COLOR_CLOSED
 	_gate_node.add_child(vis)
 
 	var col := CollisionShape2D.new()
 	col.name = "GateCollision"
 	var shape := RectangleShape2D.new()
-	shape.size = Vector2(WALL_T, 64.0)
+	shape.size = Vector2(WALL_T, GATE_H)
 	col.shape = shape
 	_gate_node.add_child(col)
 
-	# Door trigger — area just outside the gate
+	# Door trigger — straddles the threshold so {interact} fires whether the hero
+	# is pressed against the closed gate or has stepped into the open doorway.
 	var trigger := Area2D.new()
 	trigger.name = "DoorTrigger"
-	trigger.position = Vector2(20.0, 0.0)
+	trigger.position = Vector2(5.0, 0.0)
 	trigger.collision_layer = 0
 	trigger.collision_mask = 2
 
 	var tcol := CollisionShape2D.new()
 	var tshape := RectangleShape2D.new()
-	tshape.size = Vector2(60, 80)
+	tshape.size = Vector2(90, 80)
 	tcol.shape = tshape
 	trigger.add_child(tcol)
 	trigger.body_entered.connect(_on_exit_trigger_entered)
@@ -200,7 +256,8 @@ func _build_exit_gate() -> void:
 	# "Press E / R" prompt label (hidden until player enters trigger zone)
 	_gate_prompt = Label.new()
 	_gate_prompt.name = "GatePrompt"
-	_gate_prompt.text = "[E] / [R]"
+	# Run 158 — bound, so it flips between "E" and "R" live with the device.
+	InputGlyphs.bind_label(_gate_prompt, "[{interact}]")
 	_gate_prompt.add_theme_font_size_override("font_size", 16)
 	_gate_prompt.add_theme_color_override("font_color", Color(1.0, 0.88, 0.35))
 	_gate_prompt.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
@@ -217,6 +274,78 @@ func _build_exit_gate() -> void:
 	else:
 		add_child(_gate_node)
 
+	_build_exit_pocket()
+
+
+# Run 159 — goal-shaped alcove behind the exit gate, mirroring World.gd's
+# _spawn_depth_wall. Opening the gate disables its collision, so without this
+# the doorway was a straight hole into the void: the player walked through and
+# kept going east forever. Now the threshold is a dead-end you press
+# {interact} inside of.
+func _build_exit_pocket() -> void:
+	var wx: float = _half.x + WALL_T * 0.5
+	var open_half: float = GATE_H * 0.5
+
+	var pocket := StaticBody2D.new()
+	pocket.name = "ExitPocket"
+	pocket.position = Vector2(wx, 0)
+	pocket.collision_layer = 1
+	pocket.collision_mask = 0
+	pocket.add_to_group("leap_blocker")
+
+	# Floor, so the alcove doesn't read as a hole punched in the void.
+	var floor_vis := ColorRect.new()
+	floor_vis.name = "PocketFloor"
+	floor_vis.offset_left = 0.0
+	floor_vis.offset_top = -open_half
+	floor_vis.offset_right = POCKET_DEPTH
+	floor_vis.offset_bottom = open_half
+	floor_vis.color = POCKET_FLOOR_COLOR
+	floor_vis.z_index = -20
+	pocket.add_child(floor_vis)
+
+	# Back wall — caps the far end.
+	var back_vis := ColorRect.new()
+	back_vis.name = "PocketBack"
+	back_vis.offset_left = POCKET_DEPTH - POCKET_THICK * 0.5
+	back_vis.offset_top = -(open_half + POCKET_THICK)
+	back_vis.offset_right = POCKET_DEPTH + POCKET_THICK * 0.5
+	back_vis.offset_bottom = open_half + POCKET_THICK
+	back_vis.color = WALL_COLOR
+	pocket.add_child(back_vis)
+
+	var back := CollisionShape2D.new()
+	var bshape := RectangleShape2D.new()
+	bshape.size = Vector2(POCKET_THICK, open_half * 2.0 + POCKET_THICK * 2.0)
+	back.shape = bshape
+	back.position = Vector2(POCKET_DEPTH, 0.0)
+	pocket.add_child(back)
+
+	# Side walls — funnel the alcove so nobody slips around the opening.
+	for s: float in [-1.0, 1.0]:
+		var inner_y: float = s * open_half
+		var outer_y: float = s * (open_half + POCKET_THICK)
+		var side_vis := ColorRect.new()
+		side_vis.offset_left = 0.0
+		side_vis.offset_top = minf(inner_y, outer_y)
+		side_vis.offset_right = POCKET_DEPTH
+		side_vis.offset_bottom = maxf(inner_y, outer_y)
+		side_vis.color = WALL_COLOR
+		pocket.add_child(side_vis)
+
+		var side := CollisionShape2D.new()
+		var sshape := RectangleShape2D.new()
+		sshape.size = Vector2(POCKET_DEPTH, POCKET_THICK)
+		side.shape = sshape
+		side.position = Vector2(POCKET_DEPTH * 0.5, s * (open_half + POCKET_THICK * 0.5))
+		pocket.add_child(side)
+
+	var walls: Node2D = get_node_or_null("Walls")
+	if walls:
+		walls.add_child(pocket)
+	else:
+		add_child(pocket)
+
 
 func _open_gate() -> void:
 	if _gate_open:
@@ -231,7 +360,7 @@ func _open_gate() -> void:
 	# Show interact prompt if player already in the zone
 	if _player_in_gate and _gate_prompt:
 		_gate_prompt.visible = true
-	print("[Tutorial] Room %d gate opened." % _room)
+	Log.dbg("[Tutorial] Room %d gate opened." % _room)
 
 
 func _on_exit_trigger_entered(body: Node) -> void:
@@ -380,9 +509,12 @@ func _start_room_lesson() -> void:
 # ── ROOM 1: Movement + Dash ──────────────────────────────────
 
 func _room1_movement() -> void:
+	# Run 158 — all prompt copy uses {tokens} (see InputGlyphs.gd). They render as
+	# keyboard keys or pad buttons depending on what the player last touched, and
+	# every live prompt re-renders the instant they switch device.
 	var prompt := TP.show_prompt(self, "The Dream Begins...",
-		"Shino... you're dreaming. But this feels real.\n\nUse " + TP.kb("WASD") + " or " + TP.pad("Left Stick") + " to move around. Explore this strange place.",
-		"[center]" + TP.keys("WASD", "Left Stick") + "  — Move[/center]")
+		"Shino... you're dreaming. But this feels real.\n\nUse {move} to move around. Explore this strange place.",
+		"{move}  —  Move")
 	prompt.finished.connect(func():
 		_show_dash_lesson()
 	)
@@ -390,13 +522,13 @@ func _room1_movement() -> void:
 
 func _show_dash_lesson() -> void:
 	var prompt := TP.show_prompt(self, "Dash",
-		"Press " + TP.kb("Space") + " or " + TP.pad("B") + " to dash! Dashing makes you briefly invulnerable and lets you dodge through danger.",
-		"[center]" + TP.keys("Space", "B") + "  — Dash[/center]")
+		"Press {dash} to dash! Dashing makes you briefly invulnerable and lets you dodge through danger.",
+		"{dash}  —  Dash")
 	prompt.finished.connect(func():
 		_open_gate()
 		if _current_prompt:
 			_current_prompt.dismiss()
-		_current_prompt = TP.show_objective(self, "Head east — press " + TP.kb("E") + " " + TP.pad("R") + " at the gate!")
+		_current_prompt = TP.show_objective(self, "Head east — press {interact} at the gate!")
 	)
 
 
@@ -409,11 +541,11 @@ func _room2_combat() -> void:
 
 func _start_y_lesson() -> void:
 	var prompt := TP.show_prompt(self, "Combo Attacks",
-		"An enemy approaches! Press " + TP.kb("J") + " or " + TP.pad("Y") + " repeatedly to perform a combo attack. Land all hits to take it down!",
-		"[center]" + TP.keys("J", "Y") + "  — Punch Combo (tap repeatedly)[/center]")
+		"An enemy approaches! Press {attack_y} repeatedly to perform a combo attack. Land all hits to take it down!",
+		"{attack_y}  —  Punch Combo (tap repeatedly)")
 	prompt.finished.connect(func():
 		_spawn_combat_enemy("y_lesson", 3)
-		_current_prompt = TP.show_objective(self, "Defeat the enemies with Y combo!", "[center]" + TP.keys("J", "Y") + "  — Punch combo[/center]")
+		_current_prompt = TP.show_objective(self, "Defeat the enemies with your punch combo!", "{attack_y}  —  Punch combo")
 	)
 
 
@@ -427,11 +559,11 @@ func _on_y_lesson_kill() -> void:
 
 func _start_x_lesson() -> void:
 	var prompt := TP.show_prompt(self, "Heavy Attacks",
-		"Another shadow appears! Use " + TP.kb("K") + " or " + TP.pad("X") + " for heavy attacks — slower but more powerful kicks that hit hard.",
-		"[center]" + TP.keys("K", "X") + "  — Kick Combo (tap repeatedly)[/center]")
+		"Another shadow appears! Use {attack_x} for heavy attacks — slower but more powerful kicks that hit hard.",
+		"{attack_x}  —  Kick Combo (tap repeatedly)")
 	prompt.finished.connect(func():
 		_spawn_combat_enemy("x_lesson", 3)
-		_current_prompt = TP.show_objective(self, "Defeat the enemies with X combo!", "[center]" + TP.keys("K", "X") + "  — Kick combo[/center]")
+		_current_prompt = TP.show_objective(self, "Defeat the enemies with your kick combo!", "{attack_x}  —  Kick combo")
 	)
 
 
@@ -444,12 +576,15 @@ func _on_x_lesson_kill() -> void:
 
 
 func _start_ranged_lesson() -> void:
+	# The [pad]…[/pad] block only renders on a controller — twin-stick auto-fire is
+	# bound to the right stick axes and has no keyboard equivalent, so keyboard
+	# players are never told about a control they don't have.
 	var prompt := TP.show_prompt(self, "Ranged Attacks",
-		"Shadows surround you! Press " + TP.kb("L") + " or " + TP.pad("A") + " to throw ki blasts at range. You can also use " + TP.pad("Right Stick") + " to auto-fire in any direction.",
-		"[center]" + TP.keys("L", "A") + "  — Ranged    " + TP.pad("Right Stick") + "  — Auto-fire[/center]")
+		"Shadows surround you! Press {attack_a} to throw ki blasts at range.[pad] You can also hold {aim} to auto-fire in any direction, without turning to face them.[/pad]",
+		"{attack_a}  —  Ranged[pad]        {aim}  —  Auto-fire[/pad]")
 	prompt.finished.connect(func():
 		_spawn_ranged_enemies()
-		_current_prompt = TP.show_objective(self, "Defeat the ranged enemies!", "[center]" + TP.keys("L", "A") + "  or  " + TP.pad("Right Stick") + "[/center]")
+		_current_prompt = TP.show_objective(self, "Defeat the ranged enemies!", "{attack_a}[pad]   or   {aim}[/pad]")
 	)
 
 
@@ -463,13 +598,13 @@ func _on_ranged_lesson_clear() -> void:
 
 func _start_charge_lesson() -> void:
 	var prompt := TP.show_prompt(self, "Charged Attacks",
-		"Hold any attack button (" + TP.kb("J") + " " + TP.kb("K") + " " + TP.kb("L") + " or " + TP.pad("Y") + " " + TP.pad("X") + " " + TP.pad("A") + ") to charge up a powerful version! A glow appears when charged — release to unleash it.",
-		"[center]Hold " + TP.keys("J / K / L", "Y / X / A") + "  — Charge Attack[/center]")
+		"Hold any attack button ({charge}) to charge up a powerful version! A glow appears when charged — release to unleash it.",
+		"Hold {charge}  —  Charge Attack")
 	prompt.finished.connect(func():
 		# Run 150 (Bruno fix 4): 3 enemies for the charge lesson (was 1) —
 		# charged attacks shine vs groups, so give the player a real target set.
 		_spawn_combat_enemy("charge_lesson", 3)
-		_current_prompt = TP.show_objective(self, "Defeat the enemies with charged attacks!", "[center]Hold " + TP.keys("J / K / L", "Y / X / A") + " then release[/center]")
+		_current_prompt = TP.show_objective(self, "Defeat the enemies with charged attacks!", "Hold {charge} then release")
 	)
 
 
@@ -484,7 +619,7 @@ func _on_charge_lesson_kill() -> void:
 		"")
 	prompt.finished.connect(func():
 		_open_gate()
-		_current_prompt = TP.show_objective(self, "Proceed east — " + TP.kb("E") + " " + TP.pad("R") + " at the gate!")
+		_current_prompt = TP.show_objective(self, "Proceed east — {interact} at the gate!")
 	)
 
 
@@ -516,7 +651,7 @@ func _room3_meet_bea() -> void:
 			else:
 				dlg3.open("Shino", [
 					"Then let's fight through them together. Two ninjas are better than one!",
-					"Press Q (or LB) twice quickly to tag in and take control of Bea!",
+					"Double-tap the swap button to tag in and take control of Bea!",
 				])
 			dlg3.finished.connect(func():
 				dlg3.queue_free()
@@ -535,10 +670,10 @@ func _teach_tag_in() -> void:
 
 func _teach_tag_in_1p() -> void:
 	var prompt := TP.show_prompt(self, "Tag In — Switch Characters!",
-		"Press " + TP.kb("Q") + " or " + TP.pad("LB") + " twice quickly to swap between Shino and Bea! Each ninja fights with their own style. Your partner follows along and fights automatically.",
-		"[center]" + TP.keys("Q + Q", "LB + LB") + "  — Tag In (double-tap)[/center]")
+		"Press {swap} twice quickly to swap between Shino and Bea! Each ninja fights with their own style. Your partner follows along and fights automatically.",
+		"{swap2}  —  Tag In (double-tap)")
 	prompt.finished.connect(func():
-		_current_prompt = TP.show_objective(self, "Tag in Bea! Double-tap to swap!", "[center]" + TP.keys("Q + Q", "LB + LB") + "  — Tag In[/center]")
+		_current_prompt = TP.show_objective(self, "Tag in Bea! Double-tap to swap!", "{swap2}  —  Tag In")
 		_monitor_tag_in()
 	)
 
@@ -546,8 +681,8 @@ func _teach_tag_in_1p() -> void:
 func _teach_tag_in_2p() -> void:
 	# In 2P, Bea is already player-controlled by P2. Teach the swap mechanic.
 	var prompt := TP.show_prompt(self, "Player 2 — Meet Bea!",
-		"Player 2 now controls Bea! She fights with swift katana slashes (" + TP.pad("Y") + ") and powerful naginata sweeps (" + TP.pad("X") + "), plus kunai (" + TP.pad("A") + ").\n\nWant to trade characters? Both players press " + TP.kb("Q") + " or " + TP.pad("LB") + " at the same time to swap.",
-		"[center]Both press " + TP.keys("Q", "LB") + "  — Swap Characters[/center]")
+		"Player 2 now controls Bea! She fights with swift katana slashes ({attack_y}) and powerful naginata sweeps ({attack_x}), plus kunai ({attack_a}).\n\nWant to trade characters? Both players press {swap} at the same time to swap.",
+		"Both press {swap}  —  Swap Characters")
 	prompt.finished.connect(func():
 		# Skip the tag-in monitor — go straight to fighting together
 		_tagged_in_bea = true
@@ -569,7 +704,7 @@ func _on_bea_tagged_in() -> void:
 		_current_prompt = null
 
 	var prompt := TP.show_prompt(self, "Bea is in!",
-		"Bea fights with swift katana slashes (" + TP.keys("J", "Y") + ") and powerful naginata sweeps (" + TP.keys("K", "X") + "). She also throws kunai (" + TP.keys("L", "A") + ")! Clear this room with Bea to prove you've got it.",
+		"Bea fights with swift katana slashes ({attack_y}) and powerful naginata sweeps ({attack_x}). She also throws kunai ({attack_a})! Clear this room with Bea to prove you've got it.",
 		"")
 	prompt.finished.connect(func():
 		# Spawn enemies for Bea to clear
@@ -600,7 +735,7 @@ func _on_room3_cleared() -> void:
 		revive_body = "If a ninja's HP hits zero, they go down! Your partner can revive them by standing close. If both ninjas go down... it's game over.\n\nLet's practice — your partner has been downed. Walk up to them to revive!"
 	var prompt := TP.show_prompt(self, "Downed & Revive",
 		revive_body,
-		"[Stand near downed ally to revive]")
+		"Stand near a downed ally  —  or hold {interact} to revive faster")
 	prompt.finished.connect(func():
 		_start_revive_practice()
 	)
@@ -651,22 +786,25 @@ func _on_revive_done() -> void:
 		"")
 	prompt.finished.connect(func():
 		_open_gate()
-		_current_prompt = TP.show_objective(self, "Proceed east — " + TP.kb("E") + " " + TP.pad("R") + " at the gate!")
+		_current_prompt = TP.show_objective(self, "Proceed east — {interact} at the gate!")
 	)
 
 
 # ── ROOM 4: Free practice + Ult + Boon ───────────────────────
 
 func _room4_free_practice() -> void:
-	# Show full controls refresher popup
-	var swap_kb: String = "Q" if not RunState.two_player else "Q"
-	var swap_pad: String = "LB" if not RunState.two_player else "LB"
-	var swap_label: String = "Tag In" if not RunState.two_player else "Swap"
+	# Show full controls refresher popup.
+	# Run 158: this was THE worst overlap offender — six lines of body text drawn
+	# into an 80px box, straight through the hint and dismiss lines below it. The
+	# panel now auto-sizes (see TutorialPrompt._build_ui), so the copy can simply
+	# be as long as it needs to be.
+	var swap_label: String = "Swap" if RunState.two_player else "Tag In"
 	var swap_note: String = "Both players can swap who controls each ninja!" if RunState.two_player else "You can freely switch between Shino and Bea!"
 	var body: String = (
-		TP.keys("J", "Y") + " Punch   " + TP.keys("K", "X") + " Kick   " + TP.keys("L", "A") + " Ranged\n" +
-		TP.keys("Space", "B") + " Dash   " + TP.keys(swap_kb, swap_pad) + " " + swap_label + "\n" +
-		"Hold " + TP.keys("J/K/L", "Y/X/A") + " Charge   " + TP.pad("Right Stick") + " Auto-fire\n\n" +
+		"{attack_y}  Punch        {attack_x}  Kick        {attack_a}  Ranged\n" +
+		"{dash}  Dash        {swap}  " + swap_label + "\n" +
+		"Hold {charge_tight}  Charge[pad]        {aim}  Auto-fire[/pad]\n" +
+		"{ult}  Ultimate (when Chi is full)\n\n" +
 		swap_note
 	)
 	var prompt := TP.show_prompt(self, "Controls Refresher", body,
@@ -694,8 +832,8 @@ func _on_room4_wave1_clear() -> void:
 
 	# Teach Ultimate
 	var prompt := TP.show_prompt(self, "Ultimate Attack!",
-		"Your Chi meter fills as you fight! When it's full, press " + TP.kb("U") + " or " + TP.pad("RT") + " to unleash a devastating Ultimate attack that hits all nearby enemies!\n\nHere — have a full Chi bar to try it out.",
-		"[center]" + TP.keys("U", "RT") + "  — Ultimate Attack (when Chi is full)[/center]")
+		"Your Chi meter fills as you fight! When it's full, press {ult} to unleash a devastating Ultimate attack that hits all nearby enemies!\n\nHere — have a full Chi bar to try it out.",
+		"{ult}  —  Ultimate Attack (when Chi is full)")
 	prompt.finished.connect(func():
 		# Grant full chi to both
 		var player: Node = _find_player()
@@ -732,7 +870,7 @@ func _on_room4_wave2_clear() -> void:
 func _drop_tutorial_boon() -> void:
 	var prompt := TP.show_prompt(self, "Boon of Power!",
 		"After clearing rooms in the Dream World, you'll earn Boons — permanent power-ups for the current run! Each boon belongs to a food family on the island.\n\nBoth ninjas get to pick a Boon — Shino chooses first, then Bea.\n\nYou'll also find other pickups along the way:\n  Pie — restores HP\n  Dragonfruit — upgrades a boon you already have\n  Juice — auto-heal between rooms\n  Sparks — permanent stat boosts across ALL runs!",
-		"[Pick a boon to power up!]")
+		"Pick a boon to power up!")
 	prompt.finished.connect(func():
 		# Force a simple Broccoli attack boon offer
 		_show_tutorial_boon_offer()
@@ -772,7 +910,7 @@ func _show_tutorial_boon_offer() -> void:
 			RunState.remove_meta("tutorial_boon_mode")
 		_on_boon_picked()
 	)
-	_current_prompt = TP.show_objective(self, "A boon dropped! Press " + TP.kb("E") + " " + TP.pad("R") + " at the pedestal to collect it.")
+	_current_prompt = TP.show_objective(self, "A boon dropped! Press {interact} at the pedestal to collect it.")
 
 
 func _on_boon_picked() -> void:
@@ -781,7 +919,7 @@ func _on_boon_picked() -> void:
 		_current_prompt.dismiss()
 		_current_prompt = null
 	_open_gate()
-	_current_prompt = TP.show_objective(self, "Proceed to the final room — " + TP.kb("E") + " " + TP.pad("R") + " at the gate!")
+	_current_prompt = TP.show_objective(self, "Proceed to the final room — {interact} at the gate!")
 
 
 # ── ROOM 5: Shadow Miniboss ──────────────────────────────────
