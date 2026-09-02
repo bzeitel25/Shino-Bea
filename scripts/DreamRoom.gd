@@ -280,6 +280,10 @@ func _build_room_geometry(biome: Dictionary) -> void:
 		real_walls = DT.make_peaks_walls(_half, dir, gate_ws2, seed_val, dream_layout, is_cave, _gate_exit_types)
 	elif _biome_id == "jungle" and DT.jungle_walls_available():
 		real_walls = DT.make_jungle_walls(_half, dir, gate_ws2, seed_val, dream_layout)
+	elif _biome_id == "cake" and DT.cake_walls_available():
+		# Run 171 — the fortress skyline replaces the plain brown border on the
+		# five ascension rooms.
+		real_walls = DT.make_cake_walls(_half, dir, gate_ws2, seed_val, dream_layout)
 	elif _biome_id in ["jungle", "swamp", "caverns", "peaks"] and BW.available():
 		real_walls = BW.make_walls(_half, gate_ws2, seed_val)
 	if real_walls != null:

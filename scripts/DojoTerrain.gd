@@ -26,6 +26,11 @@ extends RefCounted
 #
 # floor_rects : Array[Rect2]  — walkable wooden-plank regions (world coords)
 # tatami      : Array[Dict]   — {rect: Rect2, kind: "training"|"tan"}
+# dir         : String        — Run 171: which floor/ folder to cut tiles from.
+#               Defaults to the Dojo's. The Cake Dojo (summit duel) passes
+#               CakeDojo_props/floor/ and gets chocolate planks + strawberry
+#               tatami through this exact same baker. The image cache is keyed
+#               by dir+name so the two sets can never bleed into each other.
 # ============================================================
 
 const TEXEL: int = 2
@@ -43,11 +48,12 @@ static var _cache: Dictionary = {}   # name -> Image (missing cached as false)
 # Asset loading — ResourceLoader when imported, Image.load fallback pre-import
 # (same pattern as TownTileset._load_img).
 # ---------------------------------------------------------------------------
-static func _load_img(name: String) -> Image:
-	if _cache.has(name):
-		var c = _cache[name]
+static func _load_img(name: String, dir: String = FLOOR_DIR) -> Image:
+	var key: String = dir + name
+	if _cache.has(key):
+		var c = _cache[key]
 		return c if c is Image else null
-	var p: String = FLOOR_DIR + name + ".png"
+	var p: String = dir + name + ".png"
 	var img: Image = null
 	if ResourceLoader.exists(p):
 		var r: Resource = ResourceLoader.load(p)
@@ -65,16 +71,16 @@ static func _load_img(name: String) -> Image:
 			img.resize(TILE, TILE, Image.INTERPOLATE_NEAREST)
 	else:
 		push_warning("[DojoTerrain] Missing floor art: %s" % p)
-	_cache[name] = img if img != null else false
+	_cache[key] = img if img != null else false
 	return img
 
 
 # All 16 cells of one tatami nine-slice block ([] if any are missing).
-static func _tat_tiles(prefix: String) -> Array:
+static func _tat_tiles(prefix: String, dir: String = FLOOR_DIR) -> Array:
 	var arr: Array = []
 	for r in range(4):
 		for c in range(4):
-			var im: Image = _load_img("%s_r%dc%d" % [prefix, r, c])
+			var im: Image = _load_img("%s_r%dc%d" % [prefix, r, c], dir)
 			if im == null:
 				return []
 			arr.append(im)
@@ -84,7 +90,8 @@ static func _tat_tiles(prefix: String) -> Array:
 # ---------------------------------------------------------------------------
 # Public entry — bakes the ground Sprite2D under `parent`.
 # ---------------------------------------------------------------------------
-static func build(parent: Node2D, floor_rects: Array, tatami: Array, seed_val: int) -> void:
+static func build(parent: Node2D, floor_rects: Array, tatami: Array, seed_val: int,
+		dir: String = FLOOR_DIR) -> void:
 	var old: Node = parent.get_node_or_null("DojoGround")
 	if old:
 		old.queue_free()
@@ -112,12 +119,12 @@ static func build(parent: Node2D, floor_rects: Array, tatami: Array, seed_val: i
 	# Tile art (sliced from the Cake-Dojo master sheet).
 	var planks: Array = []
 	for i in range(PLANK_COUNT):
-		var pim: Image = _load_img("plank_v_%d" % i)
+		var pim: Image = _load_img("plank_v_%d" % i, dir)
 		if pim != null:
 			planks.append(pim)
 	var mats: Dictionary = {
-		"training": _tat_tiles("tat_l"),
-		"tan": _tat_tiles("tat_d"),
+		"training": _tat_tiles("tat_l", dir),
+		"tan": _tat_tiles("tat_d", dir),
 	}
 
 	for y in range(h):

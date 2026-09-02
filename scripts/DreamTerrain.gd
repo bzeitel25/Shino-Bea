@@ -43,6 +43,9 @@ const BIOME_TILESETS: Dictionary = {
 	"swamp":   preload("res://scripts/SwampTileset.gd"),
 	"caverns": preload("res://scripts/CavernTileset.gd"),
 	"peaks":   preload("res://scripts/PeakTileset.gd"),
+	# Run 171: the cake ascension finale gets its own real art too — icing floor,
+	# chocolate chasms, candy obstacles and a skyline of stacked cake.
+	"cake":    preload("res://scripts/CakeTileset.gd"),
 }
 
 const STARRY_DIR: String = "res://Assets/Tilesets/Starry/"
@@ -294,6 +297,17 @@ static func jungle_walls_available() -> bool:
 static func make_jungle_walls(half: Vector2, exit_dir: Vector2, gate_positions: Array,
 		seed_val: int, layout: RefCounted = null) -> Node2D:
 	return BIOME_TILESETS["jungle"].make_walls(half, exit_dir, gate_positions, seed_val, layout)
+
+
+# Cake fortress border = a skyline of stacked cake architecture.
+static func cake_walls_available() -> bool:
+	var ts: Variant = BIOME_TILESETS.get("cake", null)
+	return ts != null and ts.walls_available()
+
+
+static func make_cake_walls(half: Vector2, exit_dir: Vector2, gate_positions: Array,
+		seed_val: int, layout: RefCounted = null) -> Node2D:
+	return BIOME_TILESETS["cake"].make_walls(half, exit_dir, gate_positions, seed_val, layout)
 
 
 # Swamp arena border = a swamp-TREE frame + outer forest (its own wall art,

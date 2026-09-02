@@ -3,7 +3,21 @@ extends Node2D
 # ============================================================
 # ShadowSenseiArena.gd — Run 43 (2026-06-10) — Summit duel
 # ============================================================
-# Top of the Dragon Cake Fortress. Flow:
+# Top of the Dragon Cake Fortress.
+#
+# Run 171 — THE SUMMIT IS THE DOJO. The flat ColorRect box is gone;
+# the room is now built by CakeDojoRoom.gd, which is Shino & Bea's
+# own dojo rebuilt in sugar: identical footprint, identical walls and
+# doorways, identical decor placements, every prop swapped for its
+# Cake-Dojo twin. Shadow Sensei Z waits in the shrine alcove at the
+# exact spot where the real Sensei Z sits at home (0,-190), and the
+# heroes walk in through the south end where their own front door is.
+# Geometry contract (shared with Dojo.gd):
+#     main hall  x[-480,480] y[-280,280]
+#     Shino's    x[ 180,480] y[-560,-280]
+#     Bea's      x[ 480,760] y[-280,   0]
+#
+# Flow:
 #   1. Heroes arrive — calm summit, no enemies.
 #   2. A FINAL JUICE pickup sits mid-arena (last heal — [E], free).
 #   3. Walking into the challenge zone (top-center) spawns
@@ -15,6 +29,9 @@ extends Node2D
 # GDD §9.5: Phase-2 "duel mirroring the player's own kit" comes
 # when the real Shadow Sensei moveset is built.
 # ============================================================
+
+# Run 171 — the summit room: a cake-dessert replica of the Dojo.
+const ROOM = preload("res://scripts/CakeDojoRoom.gd")
 
 const BOSS_SCENE_PATH: String = "res://scenes/Boss.tscn"
 const RUN_COMPLETE_PATH: String = "res://scenes/RunComplete.tscn"
@@ -32,10 +49,9 @@ const POLL_INTERVAL: float = 0.30
 const VICTORY_HOLD: float = 2.6
 const VICTORY_SPARKS: int = 1   # Run 45 spark economy — 1 per boss, everywhere
 
-const HALF_W: float = 420.0
-const HALF_H: float = 320.0
-const FLOOR_COLOR: Color = Color(0.50, 0.32, 0.28)   # devil's food summit
-const WALL_COLOR: Color  = Color(0.80, 0.60, 0.66)   # frosting parapets
+# Landmarks inside the cake dojo (world coords, mirroring the real one).
+const SENSEI_SEAT: Vector2 = Vector2(0, -190)    # where Sensei Z sits back home
+const JUICE_SPOT: Vector2 = Vector2(0, 60)       # centre of the training mat
 
 var _boss_alive: bool = false
 var _fight_started: bool = false
@@ -56,49 +72,20 @@ func _ready() -> void:
 	_build_heal_pickup()
 	_build_challenge_zone()
 	if banner:
-		banner.text = "THE SUMMIT\nTake the final Juice, then step into the shadow..."
+		banner.text = "THE SUMMIT — YOUR OWN DOJO, IN SUGAR\nTake the final Juice, then step into the shadow..."
 	FX.fade_from_black(0.6)
 
 
 func _build_arena() -> void:
-	var floor_rect := ColorRect.new()
-	floor_rect.offset_left = -HALF_W; floor_rect.offset_top = -HALF_H
-	floor_rect.offset_right = HALF_W; floor_rect.offset_bottom = HALF_H
-	floor_rect.color = FLOOR_COLOR
-	floor_rect.z_index = -20
-	add_child(floor_rect)
-
-	var walls := Node2D.new()
-	walls.name = "Walls"
-	add_child(walls)
-	for w in [
-		[Vector2(0, -HALF_H - 16), Vector2(HALF_W * 2 + 64, 32)],
-		[Vector2(0, HALF_H + 16), Vector2(HALF_W * 2 + 64, 32)],
-		[Vector2(-HALF_W - 16, 0), Vector2(32, HALF_H * 2 + 64)],
-		[Vector2(HALF_W + 16, 0), Vector2(32, HALF_H * 2 + 64)],
-	]:
-		var body := StaticBody2D.new()
-		body.position = w[0]
-		body.collision_layer = 1
-		body.collision_mask = 0
-		var vis := ColorRect.new()
-		var size: Vector2 = w[1]
-		vis.offset_left = -size.x * 0.5; vis.offset_top = -size.y * 0.5
-		vis.offset_right = size.x * 0.5; vis.offset_bottom = size.y * 0.5
-		vis.color = WALL_COLOR
-		body.add_child(vis)
-		var cs := CollisionShape2D.new()
-		var shape := RectangleShape2D.new()
-		shape.size = size
-		cs.shape = shape
-		body.add_child(cs)
-		walls.add_child(body)
+	# One call — floor bake, walls + scaffolding joints, north-wall faces and
+	# the full decor pass, all from CakeDojo_props. See CakeDojoRoom.gd.
+	ROOM.build(self)
 
 
 func _build_heal_pickup() -> void:
 	_heal_node = Node2D.new()
 	_heal_node.name = "FinalJuice"
-	_heal_node.position = Vector2(0, 60)
+	_heal_node.position = JUICE_SPOT
 	add_child(_heal_node)
 
 	var icon := Label.new()
@@ -136,7 +123,7 @@ func _build_heal_pickup() -> void:
 func _build_challenge_zone() -> void:
 	_challenge_zone = Area2D.new()
 	_challenge_zone.name = "ChallengeZone"
-	_challenge_zone.position = Vector2(0, -HALF_H + 110)
+	_challenge_zone.position = SENSEI_SEAT
 	_challenge_zone.collision_layer = 0
 	_challenge_zone.collision_mask = 2
 	var shape := RectangleShape2D.new()
@@ -147,7 +134,7 @@ func _build_challenge_zone() -> void:
 	add_child(_challenge_zone)
 
 	var marker := Label.new()
-	marker.text = "👤 a familiar shadow waits..."
+	marker.text = "👤 someone is sitting in Sensei's place..."
 	marker.add_theme_font_size_override("font_size", 15)
 	marker.add_theme_color_override("font_color", Color(0.75, 0.45, 0.90))
 	marker.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
@@ -197,7 +184,7 @@ func _start_fight() -> void:
 	_attach_sensei_sprite(boss)
 	add_child(boss)
 	if boss is Node2D:
-		(boss as Node2D).global_position = Vector2(0, -HALF_H + 110)
+		(boss as Node2D).global_position = SENSEI_SEAT
 	_boss_alive = true
 	_poll_timer = POLL_INTERVAL
 	if banner:

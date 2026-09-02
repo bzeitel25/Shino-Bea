@@ -47,6 +47,8 @@ const DB_SCRIPT = preload("res://scripts/DialogBox.gd")
 const DT = preload("res://scripts/DojoTerrain.gd")
 # Run 154 — real Wood_Scaffolding art for the interior wall beams.
 const WS = preload("res://scripts/WoodScaffolding.gd")
+# Run 171 — north-wall face baker, shared with the Cake Dojo summit room.
+const WA = preload("res://scripts/DojoWallArt.gd")
 
 # ── Room footprints (interior, world coords) ──────────────────────────
 # Main training hall, plus two medium side rooms tucked against the NE
@@ -499,179 +501,27 @@ func _make_wall(parent: Node, pos: Vector2, size: Vector2) -> void:
 
 # ---------------------------------------------------------------------------
 # Run 145 — real NORTH WALL faces from the Dojo Tileset wall auto-tile
-# (Assets/Tilesets/Dojo_props/wall/, sections pre-scaled to 160px tall).
-# Each run bakes one Sprite2D: a feature section (tokonoma alcove behind
-# Sensei Z, arched windows in the bedrooms) centered on its landmark, the
-# rest filled with shoji screens / plaster / posts. Faces rise INTO the
-# void above each room's top edge, so nothing overlaps the walkable floor.
+# (Assets/Tilesets/Dojo_props/wall/). Each run bakes one Sprite2D: a feature
+# section (tokonoma alcove behind Sensei Z, arched windows in the bedrooms)
+# centered on its landmark, the rest filled with shoji screens / plaster /
+# posts. Faces rise INTO the void above each room's top edge, so nothing
+# overlaps the walkable floor.
+#
+# Run 171 — the baker itself (and the Run 163b padding LOCK) now lives in
+# DojoWallArt.gd, shared with the Cake Dojo summit room so the two can never
+# drift apart. Only the art folder differs between them.
 # ---------------------------------------------------------------------------
-const WALL_ART_DIR: String = "res://Assets/Tilesets/Dojo_props/wall/"
-const WALL_FACE_H: int = 155   # Run 148: native 310px strip halved 2:1 (was 160)
-var _wall_cache: Dictionary = {}
-
-func _wall_img(name: String) -> Image:
-	if _wall_cache.has(name):
-		var c = _wall_cache[name]
-		return c if c is Image else null
-	var p: String = WALL_ART_DIR + name + ".png"
-	var img: Image = null
-	if ResourceLoader.exists(p):
-		var r: Resource = ResourceLoader.load(p)
-		if r is Texture2D:
-			img = (r as Texture2D).get_image()
-	if img == null:
-		var abs_path: String = ProjectSettings.globalize_path(p)
-		if FileAccess.file_exists(abs_path):
-			var im := Image.new()
-			if im.load(abs_path) == OK:
-				img = im
-	if img == null:
-		push_warning("[Dojo] Missing wall art: %s" % p)
-		_wall_cache[name] = false
-		return null
-	img.convert(Image.FORMAT_RGBA8)
-	_wall_cache[name] = img
-	return img
-
-
 func _build_wall_faces() -> void:
 	var host := Node2D.new()
 	host.name = "WallFaces"
 	host.z_index = -12   # over the floor bake (-30), under all decor (-1)
 	add_child(host)
 	# Main hall north wall — tokonoma alcove centered behind Sensei Z (x=0).
-	_bake_wall_run(host, -480.0, 180.0, -280.0, "wall_alcove", 0.0)
+	WA.bake_run(host, -480.0, 180.0, -280.0, "wall_alcove", 0.0)
 	# Shino's room north wall — arched window over his sleeping nook.
-	_bake_wall_run(host, 180.0, 480.0, -560.0, "wall_arch", 330.0)
+	WA.bake_run(host, 180.0, 480.0, -560.0, "wall_arch", 330.0)
 	# Bea's room north wall — matching arched window.
-	_bake_wall_run(host, 480.0, 760.0, -280.0, "wall_arch", 620.0)
-
-
-func _bake_wall_run(host: Node2D, x0: float, x1: float, base_y: float,
-		feature: String, feature_cx: float) -> void:
-	var w: int = int(round(x1 - x0))
-	if w <= 0:
-		return
-	var img := Image.create(w, WALL_FACE_H, false, Image.FORMAT_RGBA8)
-
-	# Feature section first, centered on its landmark (clamped into the run).
-	var fx0: int = -1
-	var fx1: int = -1
-	var feat: Image = _wall_img(feature)
-	if feat != null:
-		feat = _trim_empty_columns(feat)
-		fx0 = clampi(int(feature_cx - x0) - feat.get_width() / 2, 0, maxi(w - feat.get_width(), 0))
-		fx1 = mini(fx0 + feat.get_width(), w)
-		img.blit_rect(feat, Rect2i(0, 0, fx1 - fx0, WALL_FACE_H), Vector2i(fx0, 0))
-
-	# Fill the rest: shoji screens, plaster panels, the odd structural post.
-	var seq: Array = ["wall_shoji_a", "wall_shoji_b", "wall_plain_a", "wall_post",
-		"wall_plain_b", "wall_shoji_a", "wall_plain_c"]
-	var idx: int = 0
-	var cur: int = 0
-	var guard: int = 0
-	while cur < w and guard < 96:
-		guard += 1
-		if fx0 >= 0 and cur >= fx0 and cur < fx1:
-			cur = fx1
-			continue
-		var s_img: Image = _wall_img(seq[idx % seq.size()])
-		idx += 1
-		if s_img == null:
-			return
-		var limit: int = w
-		if fx0 >= 0 and cur < fx0:
-			limit = fx0
-		if limit - cur < s_img.get_width():
-			# Crop with plaster, never through the middle of a shoji panel.
-			var plain: Image = _wall_img("wall_plain_b")
-			if plain != null:
-				s_img = plain
-		var take: int = mini(s_img.get_width(), limit - cur)
-		if take <= 0:
-			cur = limit
-			continue
-		img.blit_rect(s_img, Rect2i(0, 0, take, WALL_FACE_H), Vector2i(cur, 0))
-		cur += take
-
-	_seal_wall_edges(img)
-
-	var spr := Sprite2D.new()
-	spr.texture = ImageTexture.create_from_image(img)
-	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	spr.centered = false
-	spr.position = Vector2(x0, base_y - float(WALL_FACE_H))
-	host.add_child(spr)
-
-
-# ---------------------------------------------------------------------------
-# Run 163b — WALL BAKE HYGIENE. Bruno's screenshot showed a black slit punched
-# clean through the north wall just above and right of Sensei Z.
-#
-# CAUSE: wall_alcove.png is 117px wide but its art only reaches x=111 — the
-# right-most FIVE columns are splice padding, fully transparent. _bake_wall_run
-# blitted the padded width and then resumed the panel fill at fx1, i.e. PAST
-# the padding, so those 5 columns stayed empty. The wall face has nothing
-# behind it, so the hole rendered as void: world x ≈ 54–58, y[-435,-280].
-#
-# LOCK: never trust wall art to be flush to its own bounds. Feature art is
-# trimmed to its opaque column span before placement, and the finished bake
-# gets its top/bottom edge padding clamped shut. Padding on ANY future wall
-# piece can no longer open a gap.
-# ---------------------------------------------------------------------------
-
-# Drop fully-transparent columns from both edges (interior holes are art, and
-# are left alone). Returns the source untouched when there's nothing to trim.
-func _trim_empty_columns(src: Image) -> Image:
-	var w: int = src.get_width()
-	var h: int = src.get_height()
-	var lo: int = 0
-	while lo < w and _column_empty(src, lo, h):
-		lo += 1
-	if lo >= w:
-		return src            # entirely blank — let the caller deal with it
-	var hi: int = w - 1
-	while hi > lo and _column_empty(src, hi, h):
-		hi -= 1
-	if lo == 0 and hi == w - 1:
-		return src
-	var out := Image.create(hi - lo + 1, h, false, Image.FORMAT_RGBA8)
-	out.blit_rect(src, Rect2i(lo, 0, hi - lo + 1, h), Vector2i(0, 0))
-	return out
-
-
-func _column_empty(src: Image, x: int, h: int) -> bool:
-	for y in range(h):
-		if src.get_pixel(x, y).a > 0.02:
-			return false
-	return true
-
-
-# Every wall tile carries 1–2 transparent rows of splice padding at its top and
-# bottom edge. Unsealed those become hairlines of void along the wall's edges.
-# Extend each column's outermost OPAQUE pixel outward to close them. Only the
-# edge bands are scanned, so the alcove's interior transparency is never touched.
-const WALL_EDGE_SCAN: int = 6
-
-func _seal_wall_edges(img: Image) -> void:
-	var w: int = img.get_width()
-	var h: int = img.get_height()
-	var scan: int = mini(WALL_EDGE_SCAN, h / 2)
-	for x in range(w):
-		var top: int = 0
-		while top < scan and img.get_pixel(x, top).a < 0.75:
-			top += 1
-		if top > 0 and top < scan:
-			var fill_top: Color = img.get_pixel(x, top)
-			for y in range(top):
-				img.set_pixel(x, y, fill_top)
-		var bot: int = h - 1
-		while bot > h - 1 - scan and img.get_pixel(x, bot).a < 0.75:
-			bot -= 1
-		if bot < h - 1 and bot > h - 1 - scan:
-			var fill_bot: Color = img.get_pixel(x, bot)
-			for y in range(bot + 1, h):
-				img.set_pixel(x, y, fill_bot)
+	WA.bake_run(host, 480.0, 760.0, -280.0, "wall_arch", 620.0)
 
 
 # Run 143 — real spliced art (Assets/Tilesets/Dojo_props/) replaces the old
