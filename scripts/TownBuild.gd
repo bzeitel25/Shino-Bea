@@ -33,8 +33,34 @@ extends RefCounted
 const DB = preload("res://scripts/DreamBiomes.gd")
 const DAY = preload("res://scripts/DayTerrain.gd")
 const TT = preload("res://scripts/TownTileset.gd")
+const ART = preload("res://scripts/TownArt.gd")
 const TORII = preload("res://scripts/ToriiGate.gd")
 const FOLK = preload("res://scripts/TownFolk.gd")
+
+# ---------------------------------------------------------------------------
+# Run 169 — the square is now ONE hand-authored painting per tier (TownArt.gd)
+# instead of a bake made of 32px tiles. Everything downstream of build_terrain
+# has to know which of the two it got, because the painting already contains
+# the ground, the shopfronts and the fence, and is already night-graded.
+#
+# ⚠ CONTRACT: build_terrain() is the FIRST call in both squares' build order
+# (TownSquare._ready and DreamHub._build_square), so it is the one place that
+# can latch this for the calls that follow. If you ever reorder those, these
+# two statics go stale and the square will double-darken and double up props.
+# ---------------------------------------------------------------------------
+static var _art_active: bool = false
+static var _art_tier: int = 0
+static var _art_night: bool = false
+
+
+# Which Town_props/<dir> the PLACED props come from, given a 4-tier art tier.
+# The prop folders are still the Run 143 set of three, so Under Construction
+# borrows the delapidated props and Fully Healed takes the perfect ones.
+static func prop_tier(art_tier: int) -> int:
+	match clampi(art_tier, 0, 3):
+		3: return 2
+		2: return 1
+		_: return 0
 
 # --- Arena -------------------------------------------------------------------
 const HALF_W: float = 710.0
@@ -51,7 +77,28 @@ const SKY_COLOR: Color       = Color(0.55, 0.72, 0.62)   # sunny green beyond th
 
 # --- Central Dojo landmark ---------------------------------------------------
 const DOJO_BODY_SIZE: Vector2 = Vector2(430, 265)   # visual/keepout footprint
-const DOJO_CENTER: Vector2 = Vector2(0, -60)
+#
+# ⚠ Run 169b (Bruno): "make sure the Dojo directly aligns with the ring in the
+# centre... it's fine to just put the dojo directly over it to cover the
+# existing ring." There are TWO raked-sand rings, and that is the whole problem:
+# Dojo_Building.png carries its own stone-rimmed ring baked into the sprite, and
+# Bruno kept a matching ring painted into all eight town images. They were not
+# concentric, so the square showed a double rim on the west and south.
+#
+# The fix is placement only — the scale stays at DOJO_SCALE 0.205, which Bruno
+# picked over three larger candidates. Measured off the art (the painted sand
+# blob plus its rock rim, consistent across Under Construction / Healing /
+# Fully Healed): the PAINTED ring centres on world (-40, -45). The SPRITE's ring
+# centres on texture px (1408, 1055) — 287px below the texture centre, which is
+# 287 * 0.205 = 58.8 world px below wherever the sprite is drawn. So:
+#
+#     DOJO_CENTER.y + DOJO_SPRITE_Y + 58.8  =  -45     ->  DOJO_CENTER.y = -66
+#     DOJO_CENTER.x                          =  -40
+#
+# ⚠ If DOJO_SCALE or DOJO_SPRITE_Y ever change, redo that line or the two rings
+# drift apart again. Everything else follows DOJO_CENTER on its own — collision,
+# the door host, doorstep(), the prop keepouts and the gauntlet spawn ellipse.
+const DOJO_CENTER: Vector2 = Vector2(-40, -66)
 const DOJO_ENTRANCE_W: float = 70.0      # walkable front hallway width
 const DOJO_ENTRANCE_D: float = 80.0      # hallway depth (south face inward)
 # Collision sits inside the rock ring, not at the full sprite edge.
@@ -71,7 +118,29 @@ static func doorstep() -> Vector2:
 # South carnival road. Day: the way to the Carnival Grounds, sealed with
 # bunting until RunState.carnival_open(). Night: the same arch, shut — the
 # Dragon Fruit troupe's merchants set up their tables in front of it instead.
-const CARNIVAL_POS: Vector2 = Vector2(0, HALF_H - 46.0)
+#
+# ⚠ Run 169 moved it twice over. x is -41, not 0: the painted south spine runs
+# down to the bridge on world x -41 (measured off the art at y = 340/360/380:
+# -39.4 / -42.1 / -43.7), so an arch on x = 0 stood with one foot off the road
+# — the same reason the peaks torii moved (DreamBiomes.HUB_GATE_POS).
+#
+# ⚠ Run 172 PUSHED IT 42px FURTHER SOUTH, to y 334 (Bruno: "move the carnival
+# gate further south so the shop stalls can line up either side of the path").
+# Run 169 had stopped at 292 believing the arch's west post would land on the
+# painted bonsai — but that was read off PAINTED_SOLIDS, whose west-bonsai box
+# is wrong. Re-measured straight off Town_Square_Healed_Full_Night.jpg (crop
+# world x[-420,220] y[180,400], interior mapping in TownArt): the bonsai's
+# painted extent is world x[-196,-143] y[283,375], NOT the x[-163,-97] the
+# solids table claims. The arch's 180x157 box spans x[-131,+49], so it clears
+# the bonsai by 12px whatever its y, and at y 334 it still leaves ~54px of road
+# running on to the fence line (painted rail at y ~388) behind it.
+# The gain: the arch now sits a clear 84px SOUTH of the shop row (y 250), so
+# the row frames the road instead of standing shoulder-to-shoulder with the
+# gate, and every slot clears the r140 arch keepout by 25px+.
+# ⚠ PAINTED_SOLIDS[2]/[3]'s west-bonsai entry is still the old box — an
+# invisible wall ~46px east of the real shrub. Left alone here because it is a
+# collision fact for every tier and wants its own re-measure pass.
+const CARNIVAL_POS: Vector2 = Vector2(-41.0, HALF_H - 66.0)
 
 # ---------------------------------------------------------------------------
 # NIGHT SHOP ROW (Run 167, Bruno: "keep the carnival torii to the south, add
@@ -86,11 +155,67 @@ const CARNIVAL_POS: Vector2 = Vector2(0, HALF_H - 46.0)
 #     skipped in the night build (see shop_keepouts()), which is why the row
 #     doesn't fight the benches and planters that live down there in daylight.
 # ---------------------------------------------------------------------------
+#
+# ⚠ Run 169 MOVED THE WHOLE ROW NORTH, from y ~300-318 to y 250. The painted
+# square fills its south fence line with bonsai, a notice board, a weapon rack
+# and a chest at y 306-326 (TownArt.PAINTED_SOLIDS), and all four old slots
+# landed within 40-65px of one of them. y 250 is open stone in every tier: west
+# of it the SW road spoke has already swung out past x -520, east of it the SE
+# spoke is still out past x +480, and the south spine is a narrow ribbon on
+# x -41 that every slot clears by 190px+. Re-check against TownArt if the art
+# is ever redrawn.
+#
+# ⚠ Run 170 SPREAD THE ROW OUT (Bruno: "the table area seems a bit cluttered,
+# make them a bit smaller and more spaced out"). Stalls are ~105px wide at the
+# canopy, so the old 135-150px gaps left barely 30px of air between neighbours
+# and every stand's sign ran into the next one's. Every gap is 190px now, which
+# is 85px of clear stone between canopies, and the row still fits the openings:
+#   * the south spine is a narrow ribbon on x -41 — the old slot 0 (x -210)
+#     cleared it by only 169px, under the 190px rule the comment above claims.
+#     Slot 0 moved out to -250 so all four honour it.
+#   * the west end stays inside the SW road spoke (x -520) and the east end
+#     inside the SE spoke (x +480).
+#   * the keeper (SHOP_KEEPER_POS, x -285) still stands in the gap between
+#     slot 0 and slot 2, which is exactly where the row leaves a hole.
+# Re-check against TownArt if the painted square is ever redrawn.
+# ⚠ Run 172 RE-CENTRED THE ROW ON THE ROAD (Bruno: "the vendor stall on the
+# left overlaps the swamp gate — make the stalls a bit smaller, a bit closer
+# together, and align them either side of the path"). Two faults were live:
+#   * slot 2 (x -440) sat INSIDE the swamp torii. That gate is at (-520,245)
+#     and its sprite box is x[-610,-430]; its right foot's painted pixels reach
+#     x -445. A 112px canopy at -440 spans x[-496,-384] — a 50px overlap, which
+#     is the "stall on top of the gate" in Bruno's screenshot. Slot 3 (x 365)
+#     had the same fault against the beach torii (box x[350,530]) with 60px.
+#   * the row was strung across the whole plaza from -440 to +365, so it read
+#     as four unrelated tables rather than a market lining a street.
+# The row is now SYMMETRIC ABOUT THE ROAD, which runs on x -41 (painted dirt
+# measured at x[-59,-8] through this band), two stalls a side at +-170 and
+# +-320 from there. Stands came down to TABLE_W 74 (canopy 90, +-45; the
+# road-side lantern tops out 63px from centre) so the tighter pitch still
+# leaves air EVERYWHERE. The row is squeezed between three fixed things, and
+# every one of them was the binding constraint at some point — check all three
+# before touching a number:
+#   * INBOARD, the carnival arch. Its sprite box is x[-131,+49] and it rises to
+#     y 177, straight through the stall band, so the inner pair cannot simply
+#     hug the road: at +-145 their lanterns crossed the arch's posts. +-170
+#     leaves 17px between each inner lantern and the arch.
+#   * OUTBOARD, the biome torii. The swamp gate (-520,245) box is x[-610,-430]
+#     — its right foot's painted pixels reach x -445, which is what slot 2 at
+#     the old x -440 was standing inside (a 50px overlap: Bruno's screenshot).
+#     The beach gate (440,225) box x[350,530] had the same fault against the
+#     old slot 3 at +365. Now the west end (-406) clears by 24px and the east
+#     end (+324) by 26px. THIS caps the row's total width.
+#   * BETWEEN NEIGHBOURS, 150px of pitch a side = 42px of clear stone from one
+#     stall's canopy to the next one's lantern.
+#   * y stays 250: still open stone in every tier, still north of the painted
+#     south-fence furniture at y 283+ (see PAINTED_SOLIDS), and now a clean
+#     84px north of the carnival arch.
+# Re-check against TownArt and DreamBiomes.HUB_GATE_POS if either is redrawn.
 const SHOP_SLOTS: Array = [
-	Vector2(-175.0, 318.0),
-	Vector2( 175.0, 318.0),
-	Vector2(-345.0, 300.0),
-	Vector2( 345.0, 300.0),
+	Vector2(-211.0, 250.0),
+	Vector2( 129.0, 250.0),
+	Vector2(-361.0, 250.0),
+	Vector2( 279.0, 250.0),
 ]
 const SHOP_KEEPOUT_R: float = 88.0
 
@@ -98,7 +223,12 @@ const SHOP_KEEPOUT_R: float = 88.0
 # per stall. He stands BEHIND the counters (smaller y = further back in the
 # y-sort) in the GAP between slot 0 and slot 2. Do not centre him on x=0 — the
 # carnival torii sprite spans x +-90 up to y 354 and swallows him whole.
-const SHOP_KEEPER_POS: Vector2 = Vector2(-262.0, 294.0)
+# Run 169: follows the row north — still BEHIND the counters (smaller y sorts
+# further back) and still in the gap between slot 0 and slot 2, and now well
+# clear of the carnival torii, which spans x -131..+49 up to y 354.
+# Run 172: the row tightened, so the hole he stands in moved with it — the gap
+# between slot 2 (-361) and slot 0 (-211) now centres on -286.
+const SHOP_KEEPER_POS: Vector2 = Vector2(-286.0, 196.0)
 
 
 # Props the night square must NOT place, because a merchant is standing there.
@@ -113,15 +243,20 @@ static func shop_keepouts(count: int) -> Array:
 # Sky — daylight mood tracks the healing tier; night is the same graded
 # progression pushed to dusk-blue (the CanvasModulate darkens it further).
 # ---------------------------------------------------------------------------
+# Run 169: only reached when a tier has NO painting — TownArt samples the
+# painting's own corner for the out-of-bounds fill so the water/sky beyond the
+# fence always matches. Four tiers now.
 static func sky_for_tier(tier: int, night: bool = false) -> Color:
 	if night:
-		match tier:
-			2:  return Color(0.34, 0.40, 0.62)   # Perfect — clear starry blue
-			1:  return Color(0.30, 0.34, 0.54)   # Healing
+		match clampi(tier, 0, 3):
+			3:  return Color(0.34, 0.40, 0.62)   # Fully Healed — clear starry blue
+			2:  return Color(0.30, 0.34, 0.54)   # Healing
+			1:  return Color(0.27, 0.30, 0.47)   # Under Construction
 			_:  return Color(0.24, 0.26, 0.40)   # Delapidated — murky overcast
-	match tier:
-		2:  return Color(0.58, 0.78, 0.66)   # Perfect — vivid summer green
-		1:  return SKY_COLOR                  # Healing — the original sunny green
+	match clampi(tier, 0, 3):
+		3:  return Color(0.58, 0.78, 0.66)   # Fully Healed — vivid summer green
+		2:  return SKY_COLOR                  # Healing — the original sunny green
+		1:  return Color(0.52, 0.66, 0.58)   # Under Construction
 		_:  return Color(0.46, 0.54, 0.50)   # Delapidated — washed-out overcast
 
 
@@ -133,7 +268,7 @@ static func prop_keepouts() -> Array:
 	var ko: Array = [
 		{"pos": DOJO_CENTER, "r": 310.0},
 		{"pos": DOJO_CENTER + Vector2(0, DOJO_BODY_SIZE.y * 0.5 + 40.0), "r": 130.0},
-		{"pos": Vector2(0, HALF_H - 46.0), "r": 140.0},
+		{"pos": CARNIVAL_POS, "r": 140.0},
 	]
 	for biome_id in DB.BIOME_ORDER:
 		ko.append({"pos": gate_pos(String(biome_id)), "r": 135.0})
@@ -154,14 +289,50 @@ static func gate_pos(biome_id: String) -> Vector2:
 # ---------------------------------------------------------------------------
 static func build_terrain(host: Node2D, tier: int, night: bool = false) -> void:
 	var h: Vector2 = half()
+	_art_tier = tier
+	_art_night = night
+	_art_active = false
+
+	# --- Run 169 path: one painted square -----------------------------------
+	# The painting supplies the ground, the roads, the shopfronts AND the fence,
+	# so the flat fallback floor, the Wood_Scaffolding wall art and the facade
+	# strip are all skipped. The walls still exist — as collision only.
+	if ART.build(host, h, tier, night):
+		_art_active = true
+		DAY.make_backdrop(host, h, ART.backdrop_color(tier, night, sky_for_tier(tier, night)))
+		if night:
+			_scatter_stars(host, h)
+		_invisible_border_walls(host, h)
+		ART.build_collision(host, tier)
+		ART.build_lanterns(host, night)
+		return
+
+	# --- Pre-169 path: bake the square out of tiles --------------------------
+	# Kept whole. It is what runs for a tier whose painting is missing, and it
+	# is the only reason tools/clean_town_tiles.py still matters.
+	var pt: int = prop_tier(tier)
 	DAY.make_backdrop(host, h, sky_for_tier(tier, night))
 	if night:
 		_scatter_stars(host, h)
 	DAY.make_ground(host, h, PLAZA_COLOR, PLAZA_ALT_COLOR, 11700)
 	DAY.make_border_walls(host, h, WALL_COLOR, true)
 	# Real-art overlays (baked over the flat fallback; fallback stays if art missing).
-	TT.build_ground(host, h, tier, 11700)
-	TT.facade_strip(host, h, tier)
+	TT.build_ground(host, h, pt, 11700)
+	TT.facade_strip(host, h, pt)
+
+
+# Collision-only border. The painted fence IS the wall art, so these four
+# bodies are the same geometry DayTerrain.make_border_walls builds, minus the
+# beams — a transparent ColorRect draws nothing at all.
+static func _invisible_border_walls(host: Node2D, h: Vector2) -> void:
+	var walls := Node2D.new()
+	walls.name = "DayWalls"
+	host.add_child(walls)
+	var clear := Color(0, 0, 0, 0)
+	DAY.make_wall(walls, Vector2(0, -h.y - 16), Vector2(h.x * 2 + 64, 32), clear)
+	DAY.make_wall(walls, Vector2(0, h.y + 16), Vector2(h.x * 2 + 64, 32), clear)
+	DAY.make_wall(walls, Vector2(-h.x - 16, 0), Vector2(32, h.y * 2 + 64), clear)
+	DAY.make_wall(walls, Vector2(h.x + 16, 0), Vector2(32, h.y * 2 + 64), clear)
 
 
 # Night only: a faint star field on the out-of-bounds backdrop, so the strip of
@@ -191,12 +362,17 @@ static func _scatter_stars(host: Node2D, h: Vector2) -> void:
 # NIGHT OVERLAY — Run 113's single CanvasModulate over the layer-0 world
 # canvas. HUD / menus live on CanvasLayers and stay bright, untouched.
 # ---------------------------------------------------------------------------
+# Run 169: when the square is a night-GRADED painting, the tint is softened and
+# the painting multiplies itself by the reciprocal (TownArt.build), so the art
+# lands at its authored brightness while the heroes, torii, shop stands and
+# placed props still get graded into the scene. Without the softening the night
+# art would be darkened twice and go to mud.
 static func apply_night_overlay(host: Node2D) -> void:
 	if host.get_node_or_null("NightOverlay") != null:
 		return
 	var night := CanvasModulate.new()
 	night.name = "NightOverlay"
-	night.color = RunState.NIGHT_TINT
+	night.color = ART.overlay_tint(_art_tier, _art_night) if _art_active else RunState.NIGHT_TINT
 	host.add_child(night)
 
 
@@ -349,15 +525,14 @@ static func add_gate_label(gate: Node2D, text: String, color: Color) -> Label:
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	lbl.add_theme_constant_override("outline_size", 3)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var pos: Vector2 = gate.position
-	var off := Vector2(-100, -150)
-	if pos.y < -HALF_H + 60.0:        # north wall — label below
-		off = Vector2(-100, 50)
-	elif pos.x > HALF_W - 60.0:       # east wall — label to the left
-		off = Vector2(-240, -36)
-	elif pos.x < -HALF_W + 60.0:      # west wall — label to the right
-		off = Vector2(40, -36)
-	lbl.position = off
+	# Run 174 (Bruno): the zone name used to sit at lintel height (y -150) with
+	# the default z_index, so the gate sprite (z 1) and portal (z 2) drew right
+	# over it — every label was hidden behind its own torii. Drop it to just
+	# under the posts' feet (the node origin IS the gate's foot) and lift its
+	# z_index above the gate so it can never be occluded, whatever wall it sits
+	# on. Move it back ABOVE the gate here if the under-posts read is cramped.
+	lbl.position = Vector2(-100, 14)
+	lbl.z_index = 5
 	lbl.custom_minimum_size = Vector2(200, 0)
 	gate.add_child(lbl)
 	return lbl
@@ -386,7 +561,10 @@ static func build_carnival_arch(host: Node2D, label_text: String, color: Color,
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	lbl.add_theme_constant_override("outline_size", 3)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.position = Vector2(-120, -150)
+	# Run 174 (Bruno): drop the arch label under the posts and lift it above the
+	# dragon sprite (z 1) / portal (z 2) so it stops printing through the dragon.
+	lbl.position = Vector2(-120, 14)
+	lbl.z_index = 5
 	lbl.custom_minimum_size = Vector2(240, 0)
 	arch.add_child(lbl)
 	return arch
@@ -396,8 +574,16 @@ static func build_carnival_arch(host: Node2D, label_text: String, color: Color,
 # PROPS — the tier prop set. `night` cranks the lamp GlowLights (TownTileset
 # authors them at daylight strength).
 # ---------------------------------------------------------------------------
+# Run 169 (Bruno): "avoid overlapping any props with other props or with the
+# already-painted on town props ... we can find other areas to fill with our
+# existing props too." So the placed props keep running on top of the painting;
+# every solid thing painted into the plaza is handed in as a keepout, and the
+# placement list simply skips the slots that would collide.
 static func build_props(host: Node2D, tier: int, keepouts: Array, night: bool = false) -> void:
-	TT.build_props(host, half(), tier, keepouts, night)
+	var ko: Array = keepouts.duplicate()
+	if _art_active:
+		ko.append_array(ART.prop_keepouts(tier))
+	TT.build_props(host, half(), prop_tier(tier), ko, night)
 
 
 # ---------------------------------------------------------------------------
