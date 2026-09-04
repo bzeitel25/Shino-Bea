@@ -82,6 +82,7 @@ const SIZE_HERO:  int = 40      # Press Start 2P — the game title  (8 px grid)
 var font_body:    Font = null   # DotGothic16 — has real pixel kana/kanji
 var font_micro:   Font = null   # Silkscreen   — tiny all-caps labels
 var font_display: Font = null   # Press Start 2P — titles and headings ONLY
+var font_world:   Font = null   # DotGothic16 as MSDF — world-space labels only
 
 var theme: Theme = null
 
@@ -130,6 +131,10 @@ func _load_fonts() -> void:
 		font_micro = font_body
 	if font_display == null:
 		font_display = font_body
+	# Run 174b — a scale-independent variant for WORLD-space text (see below).
+	font_world = _make_world_font()
+	if font_world == null:
+		font_world = font_body
 
 
 func _load_font(file_name: String) -> Font:
@@ -146,6 +151,37 @@ func _load_font(file_name: String) -> Font:
 		ff.hinting = TextServer.HINTING_NONE
 		ff.force_autohinter = false
 	return f
+
+
+func _make_world_font() -> Font:
+	# Run 174b (Bruno): "the font gets a bit choppy and hard to read while not
+	# fullscreen." Cause: world-space labels (gate/zone names, shop signs) ride
+	# the camera zoom (1.5x) AND the fractional window stretch, so font_body —
+	# a pixel font forced to FONT_ANTIALIASING_NONE with no mipmaps — is scaled
+	# by non-integer factors and its edges go ragged (worst when downscaled in a
+	# window). This renders the SAME DotGothic16 as a multichannel signed
+	# distance field: resolution-independent, crisp at ANY zoom or window size.
+	# The menu UI keeps font_body (crisp pixels) untouched — this is ONLY for
+	# text that lives in the world and scales with the camera.
+	var path: String = FONT_DIR + "DotGothic16-Regular.woff2"
+	if not ResourceLoader.exists(path):
+		return null
+	var src: FontFile = load(path) as FontFile
+	if src == null:
+		return null
+	var wf: FontFile = src.duplicate() as FontFile
+	if wf == null:
+		return null
+	wf.multichannel_signed_distance_field = true
+	wf.msdf_pixel_range = 8
+	wf.msdf_size = 48
+	wf.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+	wf.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_AUTO
+	wf.hinting = TextServer.HINTING_NONE
+	wf.force_autohinter = false
+	wf.generate_mipmaps = true
+	wf.clear_cache()
+	return wf
 
 
 # ------------------------------------------------------------

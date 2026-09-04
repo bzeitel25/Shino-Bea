@@ -520,10 +520,12 @@ static func add_gate_label(gate: Node2D, text: String, color: Color) -> Label:
 	var lbl := Label.new()
 	lbl.name = "GateLabel"
 	lbl.text = text
-	lbl.add_theme_font_size_override("font_size", 13)
+	if UISkin.font_world != null:
+		lbl.add_theme_font_override("font", UISkin.font_world)
+	lbl.add_theme_font_size_override("font_size", 16)
 	lbl.add_theme_color_override("font_color", color)
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	lbl.add_theme_constant_override("outline_size", 3)
+	lbl.add_theme_constant_override("outline_size", 4)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	# Run 174 (Bruno): the zone name used to sit at lintel height (y -150) with
 	# the default z_index, so the gate sprite (z 1) and portal (z 2) drew right
@@ -556,10 +558,12 @@ static func build_carnival_arch(host: Node2D, label_text: String, color: Color,
 
 	var lbl := Label.new()
 	lbl.text = label_text
-	lbl.add_theme_font_size_override("font_size", 13)
+	if UISkin.font_world != null:
+		lbl.add_theme_font_override("font", UISkin.font_world)
+	lbl.add_theme_font_size_override("font_size", 16)
 	lbl.add_theme_color_override("font_color", color)
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	lbl.add_theme_constant_override("outline_size", 3)
+	lbl.add_theme_constant_override("outline_size", 4)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	# Run 174 (Bruno): drop the arch label under the posts and lift it above the
 	# dragon sprite (z 1) / portal (z 2) so it stops printing through the dragon.
