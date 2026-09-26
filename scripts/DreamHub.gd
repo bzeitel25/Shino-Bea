@@ -97,9 +97,9 @@ func _ready() -> void:
 	# landmark → gates/arch → props (they need the shop keepouts) → folk.
 	y_sort_enabled = true
 	var tier: int = RunState.town_visual_tier()
-	Log.dbg("[DreamHub] Town visual tier: %d (0=delap 1=healing 2=perfect)." % tier)
+	Log.dbg("[DreamHub] Town art tier: %d (0=delapidated 1=under construction 2=healing 3=fully healed)." % tier)
 	TB.build_terrain(self, tier, true)
-	TB.build_dojo_landmark(self, "THE DREAM DOJO")
+	TB.build_dojo_landmark(self, "Dojo")
 	_build_gates()
 	_build_carnival_arch()
 	_build_shops()
@@ -213,11 +213,14 @@ func _build_shops() -> void:
 	# RunState.get_shop_price() (-5%/rank).
 	# Run 167 — each pick becomes a real carnival vendor table north of the
 	# south torii, staffed by the Dragon Fruit family (ShopStand.gd).
+	# Run 170 \u2014 the price is no longer glued onto the end of `desc`. Each stand
+	# paints it on its own line of the wooden board nailed to the front of the
+	# counter, so the effect text and the cost travel separately.
 	var catalog: Array = [
-		{"id": "juice",       "title": "JUICE STAND",  "desc": "Heal both 50%%  \u2014  %dc" % RunState.get_shop_price(SHOP_JUICE_COST)},
-		{"id": "dragonfruit", "title": "POM STAND",    "desc": "Level up a boon  \u2014  %dc" % RunState.get_shop_price(SHOP_DF_COST)},
-		{"id": "pie",         "title": "PIE STAND",    "desc": "+Max HP  \u2014  %dc" % RunState.get_shop_price(SHOP_PIE_COST)},
-		{"id": "boon",        "title": "MYSTERY BOON", "desc": "???  \u2014  %dc" % RunState.get_shop_price(SHOP_BOON_COST)},
+		{"id": "juice",       "title": "JUICE STAND",  "desc": "Heal both 50%",   "cost": RunState.get_shop_price(SHOP_JUICE_COST)},
+		{"id": "dragonfruit", "title": "POM STAND",    "desc": "Level up a boon", "cost": RunState.get_shop_price(SHOP_DF_COST)},
+		{"id": "pie",         "title": "PIE STAND",    "desc": "+ Max HP",        "cost": RunState.get_shop_price(SHOP_PIE_COST)},
+		{"id": "boon",        "title": "MYSTERY BOON", "desc": "???",             "cost": RunState.get_shop_price(SHOP_BOON_COST)},
 	]
 	# DragonFruit needs something to level — same gate as the dream doors.
 	if RunState.shino_boon_set.is_empty() or RunState.bea_boon_set.is_empty():
@@ -226,7 +229,7 @@ func _build_shops() -> void:
 	var stands: Array = catalog.slice(0, min(3, catalog.size()))
 	if not RunState.shop_spark_bought and randf() < SHOP_SPARK_CHANCE:
 		stands.append({"id": "spark", "title": "DRAGON SOUL",
-			"desc": "Permanent power  \u2014  %dc" % RunState.get_shop_price(SHOP_SPARK_COST)})
+			"desc": "Permanent power", "cost": RunState.get_shop_price(SHOP_SPARK_COST)})
 	stands = stands.slice(0, min(stands.size(), TB.SHOP_SLOTS.size()))
 	_shop_slot_count = stands.size()
 
@@ -250,9 +253,14 @@ func _build_shops() -> void:
 		var pos: Vector2 = TB.SHOP_SLOTS[i]
 		_shop_used[sid] = false
 		var parts: Dictionary = SHOP.build(row, sid, pos, String(st.title),
-			String(st.desc), pos.x > 0.0)
+			String(st.desc), int(st.get("cost", 0)), pos.x > 0.0)
+		# Run 170: the stand is shorter now that the floating sign is gone, so
+		# the [E] prompt drops with it — it used to be pinned above a 168px
+		# label that no longer exists.
+		# Run 172: the whole stall came down ~15% (ShopStand geometry block), so
+		# the prompt follows the canopy down another 8px.
 		var entry: Dictionary = _add_interactable(parts["root"], "shop", sid, "Buy",
-			Vector2(-84, -212))
+			Vector2(-84, -124))
 		parts["entry"] = entry
 		_shop_stands[sid] = parts
 

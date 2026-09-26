@@ -3,12 +3,20 @@ extends RefCounted
 # ============================================================
 # TownTileset.gd — Run 153 (2026-07-18) — real-art Town Square
 # ============================================================
+# ⚠ RUN 169 — READ THIS FIRST. The Town Square's GROUND is no longer baked
+# here. Each healing tier is one hand-authored painting placed by TownArt.gd;
+# build_ground() and facade_strip() below are the FALLBACK for a tier whose
+# painting is missing, and are the only reason tools/clean_town_tiles.py still
+# matters. build_props() is still live in both paths — it is what puts the
+# placed props on top of the painting. The `tier` these functions take is the
+# PROP tier (0 delap / 1 healing / 2 perfect art folders), which
+# TownBuild.prop_tier() maps the four art tiers onto — it is NOT the art tier.
+#
 # Bakes the waking-world Town Square from the three hand-spliced
-# town sheets (Assets/Tilesets/Town_props/<tier>/), swapping the
-# whole visual set by RunState.town_visual_tier():
-#   0 = delap    — Delapidated (new-save default)
-#   1 = healing  — Sensei lore tier 3+ (families on the mend)
-#   2 = perfect  — all Restored + Sensei max + full ending beaten
+# town sheets (Assets/Tilesets/Town_props/<tier>/):
+#   0 = delap    — Delapidated + Under Construction
+#   1 = healing  — Healing
+#   2 = perfect  — Fully Healed
 #
 # Same filenames exist in every tier folder, so ONE placement
 # layout serves all three tiers — only the art decays/blooms.
@@ -42,6 +50,11 @@ static var _cache: Dictionary = {}   # "tier|name" -> Image (null cached as fals
 # Asset loading — ResourceLoader when imported, Image.load fallback pre-import.
 # ---------------------------------------------------------------------------
 const DOJO_DIR: String = "res://Assets/Tilesets/Dojo_props/"
+
+# Run 169 — the painted square owns the road geometry now; build_props asks it
+# where the roads actually are. Preloaded rather than load()ed per call because
+# build_props runs it once per placement.
+const ART = preload("res://scripts/TownArt.gd")
 
 static func _load_img(tier: int, name: String) -> Image:
 	var key: String = "%d|%s" % [tier, name]
@@ -618,71 +631,76 @@ static func _gate_wall(host: Node2D, tier: int, target_h: float, foot_y: float) 
 # ---------------------------------------------------------------------------
 const PLACEMENTS: Array = [
 	# [name, world_h, x, y, collide_r (0 = walk-through)]
-	# Run 153 — all props pushed outward for the enlarged Dojo + wider ring
-	# road. RULE: nothing in the center area (Dojo only), nothing on ANY
-	# path (ring road, south spine, gate spokes). Props go in the empty
-	# wedges between paths, off to the sides.
 	#
-	# Fountain — plaza focal point, west side between SW and NW spokes.
-	["fountain",   112.0, -420.0,  -60.0, 34.0],
-	# Lamps — ring around the plaza, outside the ring road.
-	["lamp_a",      64.0, -280.0, -290.0,  6.0],
-	["lamp_b",      60.0,  280.0, -290.0,  6.0],
-	["lamp_a",      64.0,  280.0,  200.0,  6.0],
-	["lamp_b",      60.0, -280.0,  200.0,  6.0],
-	["lamp_a",      64.0, -520.0,  -40.0,  6.0],
-	["lamp_a",      64.0,  520.0,  -40.0,  6.0],
-	# Market corner — east side, between SE spoke and east wall.
-	["stall_a",    104.0,  555.0,  -60.0, 40.0],
-	["stall_b",    104.0,  565.0,   40.0, 40.0],
-	["cart",        76.0,  460.0,   80.0, 28.0],
-	["barrel_a",    40.0,  510.0,   95.0, 12.0],
-	["crate_a",     40.0,  535.0,  105.0, 12.0],
-	["barrel_a",    40.0,  480.0,  105.0, 12.0],
-	# Benches — beside the south spine, outside the ring road.
-	["bench_a",     44.0, -160.0,  240.0, 14.0],
-	["bench_b",     44.0,  160.0,  240.0, 14.0],
-	["bench_a",     44.0, -360.0,  180.0, 14.0],
-	# Green corners — trees on the grass parks.
-	["tree_a",      96.0, -430.0, -300.0, 12.0],
-	["tree_b",     104.0,  430.0, -305.0, 12.0],
-	["tree_a",      96.0, -435.0,  255.0, 12.0],
-	["tree_b",     104.0,  435.0,  250.0, 12.0],
-	# Planters + flowerbeds along the south wall.
-	["planter_a",   52.0, -300.0,  330.0,  10.0],
-	["flowerbed",   40.0, -220.0,  345.0,  14.0],
-	["planter_b",   56.0,  300.0,  332.0,  10.0],
-	["flowerbed",   40.0,  220.0,  345.0,  14.0],
-	# Fence runs framing the north grass parks.
-	["fence_a",     36.0, -380.0, -262.0,  0.0],
-	["fence_b",     36.0,  380.0, -262.0,  0.0],
-	# Hanging awning shade near the market.
-	["awning_hang", 56.0,  400.0, -260.0,  0.0],
-	# Dojo landmark dressing — stone lanterns flank the south approach
-	# outside the ring road; bonsai sit in the side wedges.
-	["dojo:lantern_stone_a", 54.0,  -70.0, 260.0,  8.0],
-	["dojo:lantern_stone_b", 54.0,   70.0, 260.0,  8.0],
-	["dojo:bonsai_c",        58.0, -380.0, -140.0, 10.0],
-	["dojo:bonsai_e",        58.0,  380.0, -140.0, 10.0],
+	# ⚠ Run 169 REPLACED THIS WHOLE LIST. The square is now a hand-painted image
+	# (TownArt.gd), and the painted roads are not the code's ellipse — the ring
+	# is wider on the west, the spokes are far flatter than 45 degrees, and both
+	# spines run down x = -41. Every Run 153 position was re-checked against the
+	# real art and most of them turned out to be standing ON a road or on top of
+	# something already painted there.
+	#
+	# The positions below were solved against three things at once and verified
+	# by rendering them over the art:
+	#   * Assets/Tilesets/Town_props/_road_mask.png — the painted road surface;
+	#   * TownArt.PAINTED_SOLIDS for ALL FOUR tiers unioned, so one list is
+	#     valid in every square;
+	#   * the torii, the carnival arch, the shop row and the Dojo footprint.
+	# Run 149's rule is unchanged and now actually enforceable: props may frame
+	# the paths, never stand on them.
+	#
+	# The four corner TREES are gone. They existed to stand on the Run 144 grass
+	# parks; the painted square has no grass parks, and a tree planted in bare
+	# cobblestone read as a mistake. The art dresses those corners itself.
+	#
+	# Fountain — west lobe, the biggest clear stretch of plaza.
+	["fountain",   112.0, -560.0,   20.0, 34.0],
+	# Lamps — in the open wedges between the roads.
+	["lamp_a",      64.0, -480.0, -300.0,  6.0],
+	["lamp_b",      60.0,  200.0, -330.0,  6.0],
+	["lamp_b",      60.0,  600.0, -160.0,  6.0],
+	["lamp_a",      64.0, -450.0,  -30.0,  6.0],
+	["lamp_b",      60.0,  620.0,  -30.0,  6.0],
+	# Market corner — east lobe, between the NE and SE spokes.
+	["stall_a",    104.0,  542.0,  -42.0, 40.0],
+	["cart",        76.0,  500.0,   42.0, 28.0],
+	["barrel_a",    40.0,  546.0, -156.0, 12.0],
+	["crate_a",     40.0,  624.0, -100.0, 12.0],
+	# Benches — south wedges and out on the west lobe.
+	["bench_a",     44.0, -308.0,  144.0, 14.0],
+	["bench_b",     44.0,  216.0,  184.0, 14.0],
+	["bench_a",     44.0, -626.0,   72.0, 14.0],
+	# Planters, flowerbeds and fence runs against the shopfronts along the north.
+	["planter_a",   52.0, -408.0, -294.0, 10.0],
+	["planter_b",   56.0,  430.0, -360.0, 10.0],
+	["flowerbed",   40.0, -560.0, -360.0, 14.0],
+	["flowerbed",   40.0,  262.0, -360.0, 14.0],
+	["fence_a",     36.0, -260.0, -360.0,  0.0],
+	["fence_b",     36.0,  560.0, -360.0,  0.0],
+	# Stone lanterns either side of the south road; bonsai in the side lobes.
+	["dojo:lantern_stone_a", 54.0, -200.0,  346.0,  8.0],
+	["dojo:lantern_stone_b", 54.0,   84.0,  362.0,  8.0],
+	["dojo:bonsai_c",        58.0, -470.0,   36.0, 10.0],
+	["dojo:bonsai_e",        58.0,  458.0,  -54.0, 10.0],
 ]
 
 # Tier flavor extras (same coordinate space).
 const TIER_EXTRAS: Dictionary = {
-	0: [   # Delapidated — rubble in the side wedges between paths.
-		["extra_rubble", 48.0, -240.0, -290.0, 16.0],
-		["extra_rubble", 44.0,  340.0,  180.0, 14.0],
-		["extra_rubble", 40.0, -430.0,   50.0, 14.0],
-		["extra_rubble", 44.0,  200.0, -310.0, 14.0],
+	# ⚠ Run 169: keyed by PROP tier (TownBuild.prop_tier maps the four art tiers
+	# onto these three prop folders), and re-solved against the painted square
+	# exactly like PLACEMENTS above. The two `extra_bloomtree` entries were
+	# dropped: the Fully Healed painting is the busiest of the four and has no
+	# clear ground left for them — and it already has wisteria in bloom over the
+	# shopfronts, which is what they were there to say.
+	0: [   # Delapidated / Under Construction — rubble in the open wedges.
+		["extra_rubble", 48.0, -456.0, -238.0, 16.0],
+		["extra_rubble", 40.0,  528.0, -242.0, 14.0],
+		["extra_rubble", 44.0,  226.0, -276.0, 14.0],
 	],
-	1: [   # Healing — repairs underway, side wedges only.
-		["extra_wheelbarrow", 56.0, -240.0, -290.0, 18.0],
-		["extra_planks",      44.0,  340.0,  180.0,  0.0],
-		["extra_toolbox",     30.0, -430.0,   50.0,  0.0],
+	1: [   # Healing — repairs underway.
+		["extra_wheelbarrow", 56.0, -456.0, -230.0, 18.0],
+		["extra_toolbox",     30.0,  520.0, -246.0,  0.0],
 	],
-	2: [   # Perfect — bougainvillea blooms on the walls.
-		["extra_bloomtree", 64.0, -500.0, -330.0, 0.0],
-		["extra_bloomtree", 64.0,  500.0, -330.0, 0.0],
-	],
+	2: [],  # Fully Healed — the painting carries it.
 }
 
 
@@ -724,9 +742,14 @@ static func build_props(parent: Node2D, half: Vector2, tier: int, keepouts: Arra
 	all.append_array(PLACEMENTS)
 	all.append_array(TIER_EXTRAS.get(tier, []))
 
-	# Run 149 — the dirt roads stay CLEAR (Bruno's rule: props may frame the
-	# paths, never stand ON them). Guard against future placements too.
+	# Run 149 — the roads stay CLEAR (Bruno's rule: props may frame the paths,
+	# never stand ON them). Run 169: when the square is a painting, the roads
+	# are whatever the ARTIST drew, so the test reads the baked stencil of the
+	# real art (TownArt.on_road) instead of the code's ellipse-and-spokes model,
+	# which no longer describes them. The segment model is still the fallback
+	# for the tile-baked square.
 	var segs: Array = _path_segments(half)
+	var use_mask: bool = ART.has_road_mask()
 
 	for rec in all:
 		var name: String = rec[0]
@@ -736,14 +759,29 @@ static func build_props(parent: Node2D, half: Vector2, tier: int, keepouts: Arra
 
 		var blocked: bool = false
 		for k in keepouts:
-			if pos.distance_to(k.pos) < float(k.r):
+			# Run 169 — a keepout may be a circle {pos, r} (everything before
+			# this run) or a RECT {pos, box}. The painted props are rectangles
+			# and several of them are long and thin; approximating a 172x46
+			# lumber stack with a circle either let props clip its ends or
+			# blanked half the corner it sits in.
+			if k.has("box"):
+				var hs: Vector2 = (k["box"] as Vector2) * 0.5
+				var kp: Vector2 = k["pos"]
+				if absf(pos.x - kp.x) < hs.x + 26.0 and pos.y > kp.y - hs.y - 26.0 \
+						and pos.y - wh < kp.y + hs.y + 26.0:
+					blocked = true
+					break
+			elif pos.distance_to(k.pos) < float(k.r):
 				blocked = true
 				break
 		if blocked:
 			continue
-		# Path clearance: skip anything whose base would touch the dirt/crumb
-		# band (16+wobble core + 3 crumb ≈ 26, plus half the collision base).
-		if _min_seg_dist(pos, segs) < 26.0 + col_r * 0.5:
+		# Path clearance: skip anything whose base would touch the road.
+		if use_mask:
+			if ART.on_road(pos, 14.0 + col_r * 0.5):
+				push_warning("[TownTileset] '%s' at %s sits on a painted road — skipped." % [name, pos])
+				continue
+		elif _min_seg_dist(pos, segs) < 26.0 + col_r * 0.5:
 			push_warning("[TownTileset] '%s' at %s sits on a path — skipped." % [name, pos])
 			continue
 

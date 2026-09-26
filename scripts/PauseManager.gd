@@ -267,8 +267,24 @@ func _open() -> void:
 	var exit_btn := _make_button("SAVE & EXIT", _save_and_exit)
 	box.add_child(controls_btn)
 	box.add_child(settings_btn)
+
+	# Run 173 — Training Room session exits. Only present while a session is
+	# live, and "Return to Training Room" only while a holo-room bout is
+	# actually running (in the Training Room itself it would be a no-op).
+	var nav_buttons: Array = [_resume_btn, controls_btn, settings_btn]
+	if RunState.training_active:
+		if not RunState.training_squad.is_empty():
+			var back_btn := _make_button("RETURN TO TRAINING ROOM", _return_to_training)
+			box.add_child(back_btn)
+			nav_buttons.append(back_btn)
+		var end_btn := _make_button("RETURN TO DOJO", _end_training)
+		box.add_child(end_btn)
+		nav_buttons.append(end_btn)
+
 	box.add_child(abandon_btn)
 	box.add_child(exit_btn)
+	nav_buttons.append(abandon_btn)
+	nav_buttons.append(exit_btn)
 
 	# Left stick / WASD navigation to match the D-pad (which already works via the
 	# built-in focus chain). B / Esc is left to _unhandled_input so it can also
@@ -276,9 +292,45 @@ func _open() -> void:
 	var nav: Node = load("res://scripts/MenuFocusNav.gd").new()
 	nav.process_mode = Node.PROCESS_MODE_ALWAYS
 	_layer.add_child(nav)
-	nav.buttons = [_resume_btn, controls_btn, settings_btn, abandon_btn, exit_btn]
+	nav.buttons = nav_buttons
 
 	_resume_btn.grab_focus()
+
+
+# Run 173 — bail out of the current holo-room bout; the training session stays
+# live and we land back on the mat.
+# Run 173 — Training Room session exits live on DreamDojo so the scene paths
+# and the RunState flag clearing have exactly one owner.
+const DREAM_DOJO = preload("res://scripts/DreamDojo.gd")
+
+
+func _return_to_training() -> void:
+	FX.play_sound("menu_close")
+	_teardown_overlay()
+	DREAM_DOJO.return_to_training(get_tree())
+
+
+# Run 173 — end the whole training session and wake up in the real Dojo.
+func _end_training() -> void:
+	FX.play_sound("menu_close")
+	_teardown_overlay()
+	DREAM_DOJO.return_to_dojo(get_tree())
+
+
+# Tear the pause overlay down without unpausing — the caller is about to change
+# scene, and handing a paused tree to a new scene freezes it on arrival.
+func _teardown_overlay() -> void:
+	if is_instance_valid(_settings_menu):
+		_settings_menu.queue_free()
+		_settings_menu = null
+	if is_instance_valid(_controls_panel):
+		_controls_panel.queue_free()
+	_controls_panel = null
+	if is_instance_valid(_layer):
+		_layer.queue_free()
+	_layer = null
+	_panel = null
+	_pause_reason = ""
 
 
 func _resume() -> void:

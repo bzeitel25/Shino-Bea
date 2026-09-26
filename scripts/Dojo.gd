@@ -30,7 +30,11 @@ extends Node2D
 #   ├ TrainingDummy / SenseiZ / HUD / Camera2D / Walls
 # ============================================================
 
-const ARENA1_PATH: String = "res://scenes/World.tscn"
+# Run 173 — the bed's second dream is now the TRAINING ROOM (the dream Dojo:
+# spawn any enemy or boss on demand), replacing the old Arena1-20 gauntlet
+# with its random waves. World.tscn and the Arena scenes are left in the
+# project but nothing routes to them any more.
+const TRAINING_ROOM_PATH: String = "res://scenes/DreamDojo.tscn"
 # Run 43 — Dream World: sleeping now offers a destination choice.
 const DREAM_HUB_PATH: String = "res://scenes/DreamHub.tscn"
 # Run 136 — Night loading screen: shows Night Start art before the dream begins.
@@ -86,6 +90,14 @@ func _ready() -> void:
 	var sm: Node = get_node_or_null("/root/SaveManager")
 	if sm == null or sm.active_slot < 0:
 		RunState.reset_run()
+
+	# Run 173 — waking up in the real Dojo ends any Training Room session,
+	# whatever route got us here (pause exit, death, menu). Clearing it HERE as
+	# well as in the exit path means no route can strand the training exits on
+	# the pause menu during a normal run.
+	RunState.training_active = false
+	RunState.training_biome = ""
+	RunState.training_squad = []
 
 	_build_environment()
 
@@ -743,8 +755,10 @@ func _goto_town_square() -> void:
 
 
 # Run 43 — sleep destination chosen on the bed:
-#   DREAM WORLD  → the real adventure (Town Square hub, 5 biomes, finale)
-#   DREAM ARENA  → training mode (the original Arena1-20 chain, no sparks)
+#   DREAM WORLD    → the real adventure (Town Square hub, 5 biomes, finale)
+#   TRAINING ROOM  → the dream Dojo (Run 173): same mat, spawn any enemy or
+#                    boss on demand, bosses open their own holo-room. Replaces
+#                    the old endless-arena gauntlet.
 var _dream_target: String = ""
 var _choice_layer: CanvasLayer = null
 
@@ -784,7 +798,7 @@ func _show_dream_choice(controlled: Node, prompt: Label) -> void:
 	var world_btn := Button.new()
 	world_btn.text = "🌙 DREAM WORLD\nThe real fight — cleanse the five biomes of Starfruit Island"
 	var arena_btn := Button.new()
-	arena_btn.text = "🥋 DREAM ARENA\nTraining mode — the endless arena gauntlet (no Dragon Souls)"
+	arena_btn.text = "🥋 TRAINING ROOM\nThe dream dojo — spawn any enemy or boss to practise on"
 	var cancel_btn := Button.new()
 	cancel_btn.text = "Stay awake"
 	for b in [world_btn, arena_btn, cancel_btn]:
@@ -808,7 +822,7 @@ func _show_dream_choice(controlled: Node, prompt: Label) -> void:
 		_begin_sleep_cinematic(controlled, prompt))
 	arena_btn.pressed.connect(func():
 		RunState.dream_world_mode = false
-		_dream_target = ARENA1_PATH
+		_dream_target = TRAINING_ROOM_PATH
 		_close_choice()
 		_begin_sleep_cinematic(controlled, prompt))
 	cancel_btn.pressed.connect(func():
@@ -876,7 +890,7 @@ func _load_arena() -> void:
 		get_tree().change_scene_to_file(NIGHT_LOAD_SCREEN_PATH)
 		return
 	# Fallback: skip loading screen if scene is missing.
-	var target: String = _dream_target if _dream_target != "" else ARENA1_PATH
+	var target: String = _dream_target if _dream_target != "" else TRAINING_ROOM_PATH
 	if not ResourceLoader.exists(target):
 		push_error("[Dojo] Dream scene not found at: %s" % target)
 		return

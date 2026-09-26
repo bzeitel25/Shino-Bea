@@ -46,7 +46,7 @@ func _ready() -> void:
 	y_sort_enabled = true
 
 	var tier: int = RunState.town_visual_tier()
-	Log.dbg("[TownSquare] Town visual tier: %d (0=delap 1=healing 2=perfect)." % tier)
+	Log.dbg("[TownSquare] Town art tier: %d (0=delapidated 1=under construction 2=healing 3=fully healed)." % tier)
 
 	TB.build_terrain(self, tier, false)
 	_build_dojo_landmark()

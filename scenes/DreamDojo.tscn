@@ -1,0 +1,142 @@
+[gd_scene load_steps=9 format=3 uid="uid://shino_dreamdojo"]
+
+; DreamDojo.tscn — Run 173. The Training Room: the Dojo, dreamed.
+; The floor, walls, wall faces and decor are NOT in this scene — DojoRoomBuild
+; generates them at _ready() from the same floorplan the real Dojo and the Cake
+; summit use. Only the actors and fixtures live here. No Sensei: he sleeps in
+; the waking world.
+
+[ext_resource type="Script" path="res://scripts/DreamDojo.gd" id="1_dreamdojo"]
+[ext_resource type="PackedScene" uid="uid://shino_player" path="res://scenes/Shino.tscn" id="2_player"]
+[ext_resource type="Script" path="res://scripts/CameraFollow.gd" id="3_camera"]
+[ext_resource type="PackedScene" uid="uid://shino_hud" path="res://scenes/HUD.tscn" id="4_hud"]
+[ext_resource type="PackedScene" uid="uid://shino_bea" path="res://scenes/Bea.tscn" id="6_bea"]
+[ext_resource type="Script" path="res://scripts/DojoTrainingDummy.gd" id="7_dummy"]
+[ext_resource type="Script" path="res://scripts/BoonDispenser.gd" id="8_dispenser"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_dummy"]
+size = Vector2(28, 40)
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_dispenser"]
+radius = 70.0
+
+[node name="World" type="Node2D"]
+script = ExtResource("1_dreamdojo")
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+position = Vector2(0, 180)
+
+[node name="Bea" parent="." instance=ExtResource("6_bea")]
+position = Vector2(36, 180)
+
+[node name="Camera2D" type="Camera2D" parent="."]
+zoom = Vector2(1.5, 1.5)
+script = ExtResource("3_camera")
+follow_speed = 8.0
+
+[node name="Enemies" type="Node2D" parent="."]
+
+[node name="TrainingDummy" type="CharacterBody2D" parent="."]
+position = Vector2(-340, -180)
+script = ExtResource("7_dummy")
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TrainingDummy"]
+shape = SubResource("RectangleShape2D_dummy")
+[node name="BodyRect" type="ColorRect" parent="TrainingDummy"]
+offset_left = -14.0
+offset_top = -20.0
+offset_right = 14.0
+offset_bottom = 20.0
+color = Color(0.72, 0.50, 0.28, 1.0)
+[node name="HeadCircle" type="ColorRect" parent="TrainingDummy"]
+offset_left = -10.0
+offset_top = -34.0
+offset_right = 10.0
+offset_bottom = -22.0
+color = Color(0.65, 0.45, 0.25, 1.0)
+[node name="NameLabel" type="Label" parent="TrainingDummy"]
+offset_left = -40.0
+offset_top = 22.0
+offset_right = 40.0
+offset_bottom = 38.0
+text = "TRAINING DUMMY"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+modulate = Color(0.9, 0.8, 0.5, 1)
+[node name="StatsLabel" type="Label" parent="TrainingDummy"]
+offset_left = -50.0
+offset_top = -60.0
+offset_right = 50.0
+offset_bottom = -38.0
+text = "Hit me!"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+modulate = Color(1.0, 0.9, 0.4, 1)
+
+[node name="BoonDispenser" type="Node2D" parent="."]
+position = Vector2(-200, -228)
+script = ExtResource("8_dispenser")
+[node name="Body" type="ColorRect" parent="BoonDispenser"]
+offset_left = -22.0
+offset_top = -36.0
+offset_right = 22.0
+offset_bottom = 20.0
+color = Color(0.16, 0.38, 0.32, 1.0)
+[node name="Slot" type="ColorRect" parent="BoonDispenser"]
+offset_left = -14.0
+offset_top = -28.0
+offset_right = 14.0
+offset_bottom = -6.0
+color = Color(0.35, 0.85, 0.65, 0.85)
+[node name="Tray" type="ColorRect" parent="BoonDispenser"]
+offset_left = -14.0
+offset_top = 4.0
+offset_right = 14.0
+offset_bottom = 14.0
+color = Color(0.08, 0.18, 0.15, 1.0)
+[node name="NameLabel" type="Label" parent="BoonDispenser"]
+offset_left = -60.0
+offset_top = 24.0
+offset_right = 60.0
+offset_bottom = 40.0
+text = "BOON DISPENSER"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 10
+modulate = Color(0.45, 0.90, 0.70, 1)
+[node name="DispenserArea" type="Area2D" parent="BoonDispenser"]
+collision_layer = 0
+collision_mask = 2
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BoonDispenser/DispenserArea"]
+shape = SubResource("CircleShape2D_dispenser")
+[node name="InteractPrompt" type="Label" parent="BoonDispenser"]
+offset_left = -80.0
+offset_top = -60.0
+offset_right = 80.0
+offset_bottom = -40.0
+text = "[E]  Dispense boons"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 13
+modulate = Color(0.55, 1.0, 0.75, 1)
+visible = false
+
+[node name="DebugHUD" type="CanvasLayer" parent="."]
+layer = 5
+
+[node name="ControlsLabel" type="Label" parent="DebugHUD"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 660.0
+offset_bottom = 100.0
+text = "Training Room"
+
+[node name="WaveClearedLabel" type="Label" parent="DebugHUD"]
+offset_left = 180.0
+offset_top = 280.0
+offset_right = 840.0
+offset_bottom = 340.0
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+text = "✦ WAVE CLEARED! ✦"
+modulate = Color(1.0, 0.9, 0.3, 1.0)
+visible = false
+
+[node name="HUD" parent="." instance=ExtResource("4_hud")]

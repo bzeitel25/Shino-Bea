@@ -14,18 +14,55 @@ extends RefCounted
 #    delegate fires at the exact same external call sites
 #    (RunComplete._finalize_run, Shino._reload_arena1) in the same order — no
 #    call-graph restructuring here.
-#  - town_visual_tier logic is byte-identical to Run 143:
-#    0 = delapidated · 1 = sensei_lore_tier >= 3 · 2 = sensei_lore_tier >= 6
-#    AND full_ending_beaten.
+#  - town_visual_tier was byte-identical to Run 143 until Run 169 rebalanced it
+#    onto four tiers keyed straight off island_healing_score() — see the block
+#    above the function for why, and for the [TUNE] knob.
 # Intra-module calls route back through RunState.<fn>() (facade round-trip, per
 # §4), so no ordering dependency between the moved functions.
 
 
-# Run 143 — TOWN VISUAL TIER (cosmetic waking-world town tileset selector).
+# ---------------------------------------------------------------------------
+# TOWN VISUAL TIER — which painted Town Square the player is standing in.
+# Run 143 defined three tiers off sensei_lore_tier. Run 169 (Bruno) replaced
+# the tile-built square with four hand-authored full-square paintings:
+#
+#   0 Delapidated  →  1 Under Construction  →  2 Healing  →  3 Fully Healed
+#
+# and asked for the ramp to be rebalanced with them:
+#   "we can make the first tier (Under construction) pop up relatively quickly
+#    like within 2-3 runs, so we have some very quick short term growth/gains
+#    visible for early players (I don't want it to be a slog especially early
+#    on). Re-balance the amount needed to level up the town accordingly."
+#
+# ⚠ WHY THIS NO LONGER READS sensei_lore_tier. That value is quantised by
+# BoonDB.SENSEI_LORE_THRESHOLDS = [0,0,2,8,18,30,40] and is floored at 1 until
+# the player has done the town visit, so the earliest it could ever move the
+# town was a healing score of 2 — several runs of depositing, with nothing to
+# show before then. The town now reads island_healing_score() DIRECTLY, so its
+# ramp can be tuned without disturbing Sensei's dialogue progression (which
+# still runs off the lore tier and is untouched).
+#
+# island_healing_score() runs 0..40: each family contributes its tier weight
+# (0/1/2/4) plus up to 0.5 for partial progress toward its next tier.
+#   1.0  ≈ one family healed once, or ~20 boons deposited across the board
+#          — reachable in 2-3 runs, which is the point;
+#   9.0  ≈ most families off Rotten, or four or five at Wilted+ — mid-game;
+#  26.0  ≈ the great majority Restored — end-game, and still gated behind the
+#          full ending so Fully Healed stays the true-ending payoff.
+# [TUNE] TOWN_TIER_SCORE is the knob. Raise index 1 if the first upgrade lands
+# before the player has understood what karma is; lower index 2 if the middle
+# stretch drags.
+# ---------------------------------------------------------------------------
+const TOWN_TIER_SCORE: Array = [0.0, 1.0, 9.0, 26.0]
+const TOWN_TIER_MAX: int = 3
+
 static func town_visual_tier() -> int:
-	if RunState.full_ending_beaten and RunState.sensei_lore_tier >= 6:
+	var score: float = RunState.island_healing_score()
+	if RunState.full_ending_beaten and score >= float(TOWN_TIER_SCORE[3]):
+		return 3
+	if score >= float(TOWN_TIER_SCORE[2]):
 		return 2
-	if RunState.sensei_lore_tier >= 3:
+	if score >= float(TOWN_TIER_SCORE[1]):
 		return 1
 	return 0
 
@@ -34,10 +71,18 @@ static func town_visual_tier() -> int:
 # Run 167 — CARNIVAL GATE (Bruno's spec, 2026-08-19)
 # The Dragon Fruit troupe only rolls into town once the island is visibly on
 # the mend. Two conditions, both required:
-#   1. the town itself has left Delapidated  (town_visual_tier() >= 1), and
+#   1. the town has reached HEALING          (town_visual_tier() >= 2), and
 #   2. NOT ONE family is still Rotten        (every family tier >= 1).
 # Ripe-across-the-board was too steep; this lands around "several families at
 # Wilted or better", which is where the town art flips anyway.
+#
+# ⚠ Run 169: this used to read `>= 1`, back when tier 1 meant a healing score
+# of 8. The four-tier rebalance moved tier 1 down to a score of 1.0 (it is the
+# early "something is happening" beat now), so the test was raised to `>= 2` —
+# score 9.0 — to keep the carnival opening exactly where it opened before.
+# Condition 2 is still the binding one in practice (every family off Rotten is
+# a score of 10); condition 1 only matters if CARNIVAL_MIN_FAMILY_TIER is ever
+# relaxed.
 # [TUNE] CARNIVAL_MIN_FAMILY_TIER is the knob if it opens too early / too late.
 #
 # ⚠ Run 167b: RunState.carnival_open() / .dragonfruit_tier() delegate here, so
@@ -49,7 +94,7 @@ static func town_visual_tier() -> int:
 const CARNIVAL_MIN_FAMILY_TIER: int = 1
 
 static func carnival_open() -> bool:
-	if RunState.town_visual_tier() < 1:
+	if RunState.town_visual_tier() < 2:
 		return false
 	for fam in BoonDB.FAMILIES:
 		if RunState.get_family_tier(String(fam)) < CARNIVAL_MIN_FAMILY_TIER:

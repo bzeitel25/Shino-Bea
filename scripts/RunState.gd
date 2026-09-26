@@ -94,6 +94,40 @@ var bea_boon_set:   Dictionary = {}
 # never leak into a real run.
 var dojo_sandbox_used: bool = false
 
+# Run 173 — Training Room (dream Dojo) session state. `training_active` is true
+# from the moment the player enters the Training Room until they leave it for
+# the real Dojo, and it is what puts the two training exits on the pause menu.
+# `training_squad` holds the roster entries the Enemy Dispenser was loaded with,
+# so the arena scene knows what to spawn after the scene change. Non-empty ==
+# a bout is live.
+# Deliberately NOT cleared by reset_run(): reset_run also fires mid-run, and the
+# Boon Dispenser calls it. The Training Room and the Dojo each clear what they
+# own on entry, so no path can strand the player with a stale session flag.
+var training_active: bool = false
+var training_biome: String = ""
+var training_squad: Array = []
+var training_tier: int = 0
+
+# Enemy Dispenser loadout rules (Run 173). A session may hold ONE big — a boss
+# OR a mini-boss, never both — plus up to five minions. The 10 "slots" below are
+# just how that reads on screen (a big fills five, each minion one); the caps
+# are the real rule, and a partial squad is a perfectly valid session.
+const TRAINING_BUDGET: int = 10
+const TRAINING_COST_BOSS: int = 5
+const TRAINING_COST_MINIBOSS: int = 5
+const TRAINING_COST_ENEMY: int = 1
+const TRAINING_MAX_BIGS: int = 1        # boss and mini-boss share this one slot
+const TRAINING_MAX_MINIONS: int = 5
+
+static func training_is_big(kind: String) -> bool:
+	return kind == "boss" or kind == "miniboss"
+
+static func training_cost(kind: String) -> int:
+	match kind:
+		"boss":     return TRAINING_COST_BOSS
+		"miniboss": return TRAINING_COST_MINIBOSS
+		_:          return TRAINING_COST_ENEMY
+
 func shino_has(id: String) -> bool:   return id in shino_boon_set
 func bea_has(id: String)   -> bool:   return id in bea_boon_set
 # Run 130 — either hero owns it (team-wide effects: statuses are shared).
@@ -3785,7 +3819,15 @@ func process_enemy_death_boons(enemy: Node2D) -> void:
 	# Phase 4 — kill counter. This hook is already the SINGLE source of enemy
 	# death detection for every enemy type (Run 134), so one line here counts
 	# every kill in the game with no per-enemy wiring.
-	StatsState.note_kill(run_stats, enemy.is_in_group("boss"))
+	#
+	# Run 173 — EXCEPT in the Training Room. Practice kills are not run kills:
+	# run_stats survives the trip back to the Dojo (reset_run only fires on a
+	# sleep if the Boon Dispenser was used), so without this guard a practice
+	# session's enemies AND bosses would ride into the next real run's stats and
+	# get banked into lifetime_stats at RunComplete. Only the COUNTER is
+	# suppressed — on-kill boons still fire, which is the point of practising.
+	if not training_active:
+		StatsState.note_kill(run_stats, enemy.is_in_group("boss"))
 	var pos: Vector2 = enemy.global_position
 	var st: Variant = enemy.get("status") if enemy.has_method("get") else null
 	if st == null and enemy.has_node("StatusComponent"):

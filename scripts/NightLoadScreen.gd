@@ -6,7 +6,7 @@ extends Control
 # Shown between the Dojo sleep cinematic and the DreamHub.
 # Displays one of the "Night Start" loading-screen images
 # (picked at random) with atmospheric text, then fades into
-# the Dream Hub (or Dream Arena, depending on dream_world_mode).
+# the Dream Hub (or the Training Room, depending on dream_world_mode).
 #
 # ART SLOTS (drop PNGs here):
 #   res://Assets/Loading Screens/Night Start 1.png
@@ -15,7 +15,9 @@ extends Control
 # ============================================================
 
 const DREAM_HUB_PATH:  String = "res://scenes/DreamHub.tscn"
-const ARENA1_PATH:     String = "res://scenes/World.tscn"
+# Run 173 — the non-DreamWorld destination is now the Training Room (dream
+# Dojo), not the old Arena1-20 gauntlet.
+const TRAINING_ROOM_PATH: String = "res://scenes/DreamDojo.tscn"
 const HOLD_SECONDS:    float  = 3.5
 
 const ART_PATHS: Array = [
@@ -37,7 +39,7 @@ func _goto_dream() -> void:
 	# the Dojo, so it is where the run clock starts. begin_run() is idempotent
 	# (only the first call sticks), so a mid-run scene reload can't restart it.
 	StatsState.begin_run(RunState.run_stats)
-	var target: String = DREAM_HUB_PATH if RunState.dream_world_mode else ARENA1_PATH
+	var target: String = DREAM_HUB_PATH if RunState.dream_world_mode else TRAINING_ROOM_PATH
 	if not ResourceLoader.exists(target):
 		push_error("[NightLoadScreen] Target scene not found: %s" % target)
 		return
