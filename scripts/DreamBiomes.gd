@@ -16,7 +16,10 @@ extends RefCounted
 # "dmg" maps to attack_damage (melee/scout) or shot_damage (ranged).
 #
 # Run 45 layout: 8 rooms — 3 enemy waves, MINI-BOSS (room 4), 3 more
-# waves, BIOME BOSS (room 8). Juice auto-drops after rooms 3 and 6
+# waves, BIOME BOSS (room 8). Run 176: every boss/mini-boss has a BossMoves
+# "moveset" (hop/fly Zelda-style fights); boss rooms open with BOSS_ADDS adds
+# drawn from the boss's "adds" list, mini-boss rooms with MINIBOSS_ESCORTS
+# roster escorts. Juice auto-drops after rooms 3 and 6
 # (just before each big fight). The boss drops the biome's single
 # Dragon Soul; the mini-boss drops none.
 # Rooms narrow toward the star tip: ROOM_WIDTHS/HEIGHTS lerp from
@@ -35,8 +38,21 @@ const ROOM_HALF_H_END:   float = 270.0
 # Easing exponent: >1 keeps rooms near the START size longer, then shrinks
 # faster toward the tip ("start big, plenty of room to decrease").
 const ROOM_SHRINK_EASE:  float = 1.5
+# Run 173 - THE BOSS CHAMBER. The arm narrows toward the tip (the squeeze
+# builds tension) and then OPENS BACK UP into a proper arena at the end.
+# The old tip size was 680x540 full, which at the authored 1.5 camera zoom
+# is almost exactly ONE screen (1280/1.5 x 720/1.5 = 853x480) - the boss and
+# both heroes were permanently in frame, so there was nowhere to reposition
+# to and nothing to chase. This is wider than room 1.
+const BOSS_HALF_W: float = 680.0
+const BOSS_HALF_H: float = 480.0
 const ROOMS_PER_BIOME:   int   = 8
 const MINIBOSS_ROOM:     int   = 4          # mid-biome gate fight (no spark)
+# Run 176 — opening escorts (Bruno: "a few more adds each ... bosses more than
+# minibosses"). Was 3 boss adds / 1 mini-boss escort. Bosses also summon more
+# mid-fight through their moveset (capped per move by max_alive).
+const BOSS_ADDS:         int   = 6
+const MINIBOSS_ESCORTS:  int   = 3
 const JUICE_ROOMS:       Array = [3, 6]     # juice auto-drops after these rooms
 const CAKE_ROOMS:        int   = 5
 
@@ -83,9 +99,10 @@ const BIOMES: Dictionary = {
 			# rig REPLACES the old placeholder "Funnel-Cake Bull" charger).
 			{"name": "Onion-Ring Rollick","arch": "charger","hp": 200, "dmg": 16, "speed": 50.0,  "scale": 1.0,  "tint": Color(1.00, 0.66, 0.16), "sprite_rig": "onion"},
 		],
-		"miniboss": {"name": "Corn Dog Colossus", "arch": "melee", "hp": 420, "dmg": 14, "speed": 70.0, "scale": 1.9, "tint": Color(0.95, 0.50, 0.15), "sprite_rig": "colossus", "secondary": "smash"},
-		"boss":     {"name": "Corn Dog Kraken",   "arch": "melee", "hp": 950, "dmg": 18, "speed": 80.0, "scale": 2.6, "tint": Color(0.80, 0.35, 0.10), "sprite_rig": "kraken", "secondary": "smash",
-					 "adds": [{"name": "Cotton-Candy Wisp", "arch": "scout", "hp": 30, "dmg": 5, "speed": 158.0, "scale": 1.0, "tint": Color(0.95, 0.70, 0.90), "sprite_rig": "wisp"}]},
+		"miniboss": {"name": "Corn Dog Colossus", "arch": "melee", "hp": 420, "dmg": 14, "speed": 70.0, "scale": 1.9, "tint": Color(0.95, 0.50, 0.15), "sprite_rig": "colossus", "secondary": "smash", "moveset": "colossus"},
+		"boss":     {"name": "Corn Dog Kraken",   "arch": "melee", "hp": 950, "dmg": 18, "speed": 80.0, "scale": 2.6, "tint": Color(0.80, 0.35, 0.10), "sprite_rig": "kraken", "secondary": "smash", "moveset": "kraken",
+					 "adds": [{"name": "Cotton-Candy Wisp", "arch": "scout", "hp": 30, "dmg": 5, "speed": 158.0, "scale": 1.0, "tint": Color(0.95, 0.70, 0.90), "sprite_rig": "wisp"},
+					          {"name": "Boardwalk Churro Chomper", "arch": "melee", "hp": 65, "dmg": 8, "speed": 85.0, "scale": 1.0, "tint": Color(1.00, 0.66, 0.30), "sprite_rig": "churro", "on_hit_burn": {"stacks": 1, "duration": 3.0}}]},
 	},
 	"jungle": {
 		"display":   "Rotwood Jungle",
@@ -116,9 +133,10 @@ const BIOMES: Dictionary = {
 			{"name": "Licorice Lasher",      "arch": "laser",  "hp": 50,  "dmg": 14, "speed": 60.0,  "scale": 1.0,  "tint": Color(0.20, 0.14, 0.24), "sprite_rig": "licorice", "on_hit_stun": {"duration": 0.6}},
 			# Run 126 — legacy procedural "Pop-Rocks Sprinter" (boom scout) + "Coconut Charger" (charger), no sprite rigs, REMOVED.
 		],
-		"miniboss": {"name": "Gummy Gorilla",       "arch": "melee", "hp": 460,  "dmg": 15, "speed": 75.0, "scale": 1.9, "tint": Color(0.90, 0.25, 0.45), "sprite_rig": "gorilla", "secondary": "smash"},
-		"boss":     {"name": "Banana-Split Simian", "arch": "melee", "hp": 1050, "dmg": 19, "speed": 92.0, "scale": 2.5, "tint": Color(0.95, 0.80, 0.30), "sprite_rig": "simian", "secondary": "smash",
-					 "adds": [{"name": "Trail-Blaze Squirrel", "arch": "scout", "hp": 32, "dmg": 6, "speed": 156.0, "scale": 1.0, "tint": Color(0.85, 0.55, 0.30), "sprite_rig": "squirrel"}]},
+		"miniboss": {"name": "Gummy Gorilla",       "arch": "melee", "hp": 460,  "dmg": 15, "speed": 75.0, "scale": 1.9, "tint": Color(0.90, 0.25, 0.45), "sprite_rig": "gorilla", "secondary": "smash", "moveset": "gorilla"},
+		"boss":     {"name": "Banana-Split Simian", "arch": "melee", "hp": 1050, "dmg": 19, "speed": 92.0, "scale": 2.5, "tint": Color(0.95, 0.80, 0.30), "sprite_rig": "simian", "secondary": "smash", "moveset": "simian",
+					 "adds": [{"name": "Trail-Blaze Squirrel", "arch": "scout", "hp": 32, "dmg": 6, "speed": 156.0, "scale": 1.0, "tint": Color(0.85, 0.55, 0.30), "sprite_rig": "squirrel"},
+					          {"name": "Sour-Gummy Serpent", "arch": "scout", "hp": 60, "dmg": 10, "speed": 135.0, "scale": 1.0, "tint": Color(0.55, 0.85, 0.35), "sprite_rig": "gummy", "on_hit_poison": {"stacks": 1, "duration": 4.0}}]},
 	},
 	"swamp": {
 		"display":   "Pickle Mire",
@@ -145,9 +163,10 @@ const BIOMES: Dictionary = {
 			{"name": "Expired-Egg Bloater",  "arch": "charger","hp": 200, "dmg": 15, "speed": 52.0,  "scale": 1.0,  "tint": Color(0.85, 0.82, 0.55), "sprite_rig": "eggbomb", "on_hit_poison": {"stacks": 2, "duration": 4.0}, "death_explosion": {"radius": 80.0, "delay": 1.5, "dmg_mult": 1.25, "status": "poison", "status_duration": 3.0, "status_stacks": 2}},
 			# Run 126 — legacy procedural "Bog-Light Zapper" (laser, no sprite rig) REMOVED.
 		],
-		"miniboss": {"name": "Mustard Marauder", "arch": "ranged", "hp": 380,  "dmg": 14, "speed": 95.0, "scale": 1.8, "tint": Color(0.90, 0.75, 0.10), "sprite_rig": "mustard"},
-		"boss":     {"name": "Pickled Hydra",    "arch": "melee",  "hp": 1000, "dmg": 18, "speed": 70.0, "scale": 2.6, "tint": Color(0.35, 0.60, 0.20), "sprite_rig": "hydra", "secondary": "smash",
-					 "adds": [{"name": "Sauerkraut Skulker", "arch": "scout", "hp": 30, "dmg": 6, "speed": 154.0, "scale": 1.0, "tint": Color(0.80, 0.78, 0.55), "sprite_rig": "kraut", "on_hit_poison": {"stacks": 1, "duration": 3.0}}]},
+		"miniboss": {"name": "Mustard Marauder", "arch": "ranged", "hp": 380,  "dmg": 14, "speed": 95.0, "scale": 1.8, "tint": Color(0.90, 0.75, 0.10), "sprite_rig": "mustard", "moveset": "mustard", "boss_brain": true},
+		"boss":     {"name": "Pickled Hydra",    "arch": "melee",  "hp": 1000, "dmg": 18, "speed": 70.0, "scale": 2.6, "tint": Color(0.35, 0.60, 0.20), "sprite_rig": "hydra", "secondary": "smash", "moveset": "hydra",
+					 "adds": [{"name": "Sauerkraut Skulker", "arch": "scout", "hp": 30, "dmg": 6, "speed": 154.0, "scale": 1.0, "tint": Color(0.80, 0.78, 0.55), "sprite_rig": "kraut", "on_hit_poison": {"stacks": 1, "duration": 3.0}},
+					          {"name": "Rancid-Relish Runt", "arch": "melee", "hp": 88, "dmg": 11, "speed": 82.0, "scale": 1.0, "tint": Color(0.55, 0.72, 0.30), "sprite_rig": "relish", "on_hit_poison": {"stacks": 1, "duration": 4.0}}]},
 	},
 	"caverns": {
 		"display":   "Emberglass Caverns",
@@ -180,9 +199,10 @@ const BIOMES: Dictionary = {
 			{"name": "Jawbreaker Juggernaut","arch": "charger","hp": 210, "dmg": 16, "speed": 50.0,  "scale": 1.0,  "tint": Color(0.85, 0.55, 0.75), "sprite_rig": "jawbreaker", "on_hit_stun": {"duration": 0.55}, "on_hit_burn": {"stacks": 1, "duration": 3.0}},
 			# Run 126 — legacy procedural "Ember-Beam Geode" (laser) + "Firecracker Bug" (boom scout), no sprite rigs, REMOVED.
 		],
-		"miniboss": {"name": "Rock-Candy Golem",    "arch": "melee", "hp": 520,  "dmg": 16, "speed": 60.0, "scale": 2.0, "tint": Color(0.60, 0.35, 0.85), "sprite_rig": "rockcandy", "secondary": "smash"},
-		"boss":     {"name": "Spicy Ramen Phoenix", "arch": "melee", "hp": 1100, "dmg": 20, "speed": 100.0, "scale": 2.4, "tint": Color(0.95, 0.35, 0.10), "sprite_rig": "phoenix", "secondary": "smash",
-					 "adds": [{"name": "Chili Critter", "arch": "scout", "hp": 30, "dmg": 6, "speed": 158.0, "scale": 1.0, "tint": Color(0.90, 0.30, 0.15), "sprite_rig": "chili", "on_hit_burn": {"stacks": 1, "duration": 3.0}}]},
+		"miniboss": {"name": "Rock-Candy Golem",    "arch": "melee", "hp": 520,  "dmg": 16, "speed": 60.0, "scale": 2.0, "tint": Color(0.60, 0.35, 0.85), "sprite_rig": "rockcandy", "secondary": "smash", "moveset": "rockcandy"},
+		"boss":     {"name": "Spicy Ramen Phoenix", "arch": "melee", "hp": 1100, "dmg": 20, "speed": 100.0, "scale": 2.4, "tint": Color(0.95, 0.35, 0.10), "sprite_rig": "phoenix", "secondary": "smash", "moveset": "phoenix",
+					 "adds": [{"name": "Chili Critter", "arch": "scout", "hp": 30, "dmg": 6, "speed": 158.0, "scale": 1.0, "tint": Color(0.90, 0.30, 0.15), "sprite_rig": "chili", "on_hit_burn": {"stacks": 1, "duration": 3.0}},
+					          {"name": "Fry-Oil Fiend", "arch": "scout", "hp": 58, "dmg": 11, "speed": 140.0, "scale": 1.0, "tint": Color(0.95, 0.70, 0.25), "sprite_rig": "fryoil", "on_hit_burn": {"stacks": 1, "duration": 3.0}}]},
 	},
 	"peaks": {
 		"display":   "Frostpeak",
@@ -210,9 +230,10 @@ const BIOMES: Dictionary = {
 			# Run 122 — Frozen-Yogurt Yeti (charger, knockback + slow) REPLACES "Avalanche Yak".
 			{"name": "Frozen-Yogurt Yeti",       "arch": "charger","hp": 215, "dmg": 17, "speed": 50.0,  "scale": 1.0,  "tint": Color(0.90, 0.90, 0.98), "sprite_rig": "yeti", "on_hit_slow": {"stacks": 1}},
 		],
-		"miniboss": {"name": "Sundae Sentinel",         "arch": "melee", "hp": 540,  "dmg": 16, "speed": 65.0, "scale": 2.0, "tint": Color(0.90, 0.85, 0.95), "sprite_rig": "sentinel", "secondary": "smash"},
-		"boss":     {"name": "Brain-Freeze Yeti Sundae","arch": "melee", "hp": 1200, "dmg": 21, "speed": 75.0, "scale": 2.7, "tint": Color(0.80, 0.90, 1.00), "sprite_rig": "yetiboss", "secondary": "smash",
-					 "adds": [{"name": "Whipped-Cream Wraith", "arch": "scout", "hp": 30, "dmg": 6, "speed": 156.0, "scale": 1.0, "tint": Color(0.96, 0.96, 0.98), "sprite_rig": "wraith", "on_hit_slow": {"stacks": 1}}]},
+		"miniboss": {"name": "Sundae Sentinel",         "arch": "melee", "hp": 540,  "dmg": 16, "speed": 65.0, "scale": 2.0, "tint": Color(0.90, 0.85, 0.95), "sprite_rig": "sentinel", "secondary": "smash", "moveset": "sentinel"},
+		"boss":     {"name": "Brain-Freeze Yeti Sundae","arch": "melee", "hp": 1200, "dmg": 21, "speed": 75.0, "scale": 2.7, "tint": Color(0.80, 0.90, 1.00), "sprite_rig": "yetiboss", "secondary": "smash", "moveset": "yetiboss",
+					 "adds": [{"name": "Whipped-Cream Wraith", "arch": "scout", "hp": 30, "dmg": 6, "speed": 156.0, "scale": 1.0, "tint": Color(0.96, 0.96, 0.98), "sprite_rig": "wraith", "on_hit_slow": {"stacks": 1}},
+					          {"name": "Peppermint Prowler", "arch": "melee", "hp": 80, "dmg": 11, "speed": 88.0, "scale": 1.0, "tint": Color(0.90, 0.40, 0.45), "sprite_rig": "prowler", "on_hit_slow": {"stacks": 1}}]},
 	},
 	# ── Finale climb — Devil's Food Dragon-Cake fortress ─────────────────────
 	# Run 126: climb pulls from ALL five biome rosters only (rigged sprites).
@@ -246,13 +267,38 @@ const BIOMES: Dictionary = {
 
 const BIOME_ORDER: Array = ["beach", "jungle", "swamp", "caverns", "peaks"]
 
-# Hub gate placement (plaza is ~1420x800; gates at the end of the dirt paths).
+# Hub gate placement (plaza is 1420x800; a torii stands 180 wide x ~148 tall,
+# anchored bottom-centre on the position below). Shared by BOTH squares.
+#
+# ⚠ Run 169 RE-AIMED ALL FIVE onto the painted roads. Until then these were
+# aimed at the code-baked ribbons, and the hand-painted square draws its roads
+# somewhere else: the spokes are much flatter than 45 degrees and stop well
+# short of the fence, and both spines run down x = -41, not x = 0. The old
+# positions put three of the five torii on bare cobblestone past the end of
+# their own road.
+#
+# Every position below is verified against Town_props/_road_mask.png (the base
+# is ON the painted road) and against TownArt.PAINTED_SOLIDS for all four tiers
+# (the 180x148 sprite box clears every painted prop). Re-run
+# tools/bake_town_roadmask.py and re-check if the square is ever repainted.
 const HUB_GATE_POS: Dictionary = {
-	"peaks":   Vector2(0, -390),      # N  — flush with north wall
-	"jungle":  Vector2(580, -200),    # NE — at end of dirt path
-	"beach":   Vector2(580, 280),     # SE — at end of dirt path (nudged south)
-	"swamp":   Vector2(-580, 280),    # SW — at end of dirt path (nudged south)
-	"caverns": Vector2(-580, -200),   # NW — at end of dirt path
+	# N — on the north spine, at the wall. The spine is on x -41, measured off
+	# the art at y -370/-350/-330 (-41.7 / -40.3 / -37.9).
+	"peaks":   Vector2(-41, -390),
+	# NE — pulled IN from the spoke's tip (which is at x ~530). At the tip the
+	# torii's lintel crosses the painted stack of lumber at (575,-318); x 398 is
+	# the furthest out it can stand with its whole 180px box clear of it.
+	# [TUNE] push back toward (505,-190) if you would rather have the gate at
+	# the road's end and let it pass in front of the lumber.
+	"jungle":  Vector2(398, -180),
+	# SE — on the spoke's rounded end. Cannot go further out: the walled zen
+	# garden's west wall is at x 552 in the healed art.
+	"beach":   Vector2(440, 225),
+	# SW — on the spoke's rounded end, clear of the west bonsai pots.
+	"swamp":   Vector2(-520, 245),
+	# NW — right on the spoke tip (road tip measured at (-614,-220)); nothing is
+	# painted in that corner, so this one keeps the full reach.
+	"caverns": Vector2(-596, -212),
 }
 
 const ARCH_SCENES: Dictionary = {
@@ -279,6 +325,11 @@ static func get_biome(id: String) -> Dictionary:
 # linearly toward the star tip. Cake climb narrows over CAKE_ROOMS.
 static func room_half_extents(room: int, biome_id: String) -> Vector2:
 	var total: int = CAKE_ROOMS if biome_id == "cake" else ROOMS_PER_BIOME
+	# Run 173 - the star arm ends in a wide boss chamber instead of the
+	# tightest closet of the run. The cake climb is exempt: it has no boss
+	# room (its summit is the Shadow Sensei arena, a separate scene).
+	if biome_id != "cake" and room >= ROOMS_PER_BIOME:
+		return Vector2(BOSS_HALF_W, BOSS_HALF_H)
 	var t: float = clamp(float(room - 1) / float(max(1, total - 1)), 0.0, 1.0)
 	t = pow(t, ROOM_SHRINK_EASE)   # stay big early, shrink harder toward the tip
 	return Vector2(

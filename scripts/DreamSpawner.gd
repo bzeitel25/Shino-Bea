@@ -10,8 +10,9 @@ extends Node2D
 #
 # Reads RunState.current_biome / RunState.biome_room and spawns:
 #   rooms 1-3, 5-7 → a mixed wave from the biome roster
-#   room 4         → MINI-BOSS (+1 escort)   (DB.MINIBOSS_ROOM)
-#   room 8         → BIOME BOSS (+3 adds)    (DB.ROOMS_PER_BIOME)
+#   room 4         → MINI-BOSS (+DB.MINIBOSS_ESCORTS escorts)  (DB.MINIBOSS_ROOM)
+#   room 8         → BIOME BOSS (+DB.BOSS_ADDS adds)           (DB.ROOMS_PER_BIOME)
+#   (Run 176: was +1 / +3.)
 # Cake climb (current_biome == "cake", rooms 1-5) → mixed wave from
 # all rosters; wave size and tier scaling crank upward.
 #
@@ -32,6 +33,8 @@ extends Node2D
 signal wave_cleared
 
 const DB = preload("res://scripts/DreamBiomes.gd")
+# Run 173 — boss / mini-boss AI host (move pool, phases, positioning).
+const BOSS_SCENE: String = "res://scenes/BossBrainEnemy.tscn"
 const ESG = preload("res://scripts/EnemySpriteGen.gd")
 
 const POLL_INTERVAL: float = 0.2
@@ -72,8 +75,14 @@ var _baseline_set: bool = false
 var _alive_ids: Dictionary = {}        # instance_id -> true, enemies we've seen
 
 
+# Run 173 — the Boss Test Arena hosts a DreamSpawner purely to reuse
+# apply_config()/placement, and must start EMPTY. Live rooms leave this true.
+@export var autospawn: bool = true
+
+
 func _ready() -> void:
-	call_deferred("_spawn_wave")
+	if autospawn:
+		call_deferred("_spawn_wave")
 
 
 func _process(delta: float) -> void:
@@ -103,22 +112,27 @@ func _spawn_wave() -> void:
 
 	var configs: Array = []
 	if _biome_id != "cake" and _room >= DB.ROOMS_PER_BIOME:
-		# BIOME BOSS + 3 adds.
+		# BIOME BOSS + DB.BOSS_ADDS adds (Run 176: was 3). The opening adds join
+		# the "boss_add" group so the boss's summon caps count them too - the
+		# room fills up, it never floods.
 		_is_special = true
 		var boss_cfg: Dictionary = (biome["boss"] as Dictionary).duplicate(true)
 		boss_cfg["is_boss"] = true
 		configs.append(boss_cfg)
 		var adds: Array = boss_cfg.get("adds", [])
-		for _i in range(3):
+		for _i in range(DB.BOSS_ADDS):
 			if not adds.is_empty():
-				configs.append((adds[randi() % adds.size()] as Dictionary).duplicate())
+				var add_cfg: Dictionary = (adds[randi() % adds.size()] as Dictionary).duplicate()
+				add_cfg["_boss_add"] = true
+				configs.append(add_cfg)
 	elif _biome_id != "cake" and _room == DB.MINIBOSS_ROOM:
-		# MINI-BOSS + 1 escort from the roster.
+		# MINI-BOSS + DB.MINIBOSS_ESCORTS escorts from the roster (Run 176: was 1).
 		_is_special = true
 		var mb_cfg: Dictionary = (biome["miniboss"] as Dictionary).duplicate(true)
 		mb_cfg["is_miniboss"] = true
 		configs.append(mb_cfg)
-		configs.append(DB.random_enemy(_biome_id))
+		for _i in range(DB.MINIBOSS_ESCORTS):
+			configs.append(DB.random_enemy(_biome_id))
 	else:
 		var n: int = DB.wave_size(_room)
 		if _biome_id == "cake":
@@ -139,6 +153,8 @@ func _spawn_wave() -> void:
 		var e: Node = _make_enemy(cfg)
 		if e == null:
 			continue
+		if cfg.get("_boss_add", false):
+			e.add_to_group("boss_add")
 		# Bosses spawn in the central chamber so the entrance reads as an
 		# encounter; everyone else scatters across the walkable layout.
 		var pos: Vector2 = Vector2(0, -60)
@@ -242,9 +258,31 @@ func _spawn_reinforcement() -> void:
 	_arrive(e, cfg)
 
 
+# Which scene hosts this config. Run 173 — bosses and mini-bosses host on
+# BossBrainEnemy.tscn instead of the basic-grunt DummyEnemy.tscn. BossBrain
+# EXTENDS DummyEnemy, so a boss with no BossMoves entry resolves to
+# BossMoves.legacy_pool() and behaves exactly as it did before. Only the melee
+# archetype is re-hosted: BossBrain is a melee host, so re-pointing the ranged
+# Mustard Marauder at it would strip its gun (it gets its own script when the
+# swamp is redesigned).
+#
+# STATIC on purpose: BossTestArena.gd spawns through this same call, so the
+# sandbox can never host a boss differently from a live run.
+static func scene_for_config(cfg: Dictionary) -> String:
+	var arch: String = String(cfg.get("arch", "melee"))
+	var scene_path: String = DB.ARCH_SCENES.get(arch, DB.ARCH_SCENES["melee"])
+	# Run 176 — "boss_brain": true re-hosts a non-melee big on BossBrain too
+	# (Mustard Marauder: its gun is now the moveset's volleys / mortars).
+	if (arch == "melee" or bool(cfg.get("boss_brain", false))) \
+	and (cfg.get("is_boss", false) or cfg.get("is_miniboss", false)) \
+	and ResourceLoader.exists(BOSS_SCENE):
+		scene_path = BOSS_SCENE
+	return scene_path
+
+
 # Instantiate an archetype scene and apply its DreamBiomes config preset.
 func _make_enemy(cfg: Dictionary) -> Node:
-	var scene_path: String = DB.ARCH_SCENES.get(String(cfg.get("arch", "melee")), DB.ARCH_SCENES["melee"])
+	var scene_path: String = scene_for_config(cfg)
 	if not ResourceLoader.exists(scene_path):
 		push_warning("[DreamSpawner] Missing archetype scene: %s" % scene_path)
 		return null
@@ -473,6 +511,15 @@ static func apply_config(e: Node, cfg: Dictionary, tier: int) -> void:
 	# Run 122 — secondary attack flag (e.g. Nacho-Slag Golem's smash shockwave).
 	if String(cfg.get("secondary", "")) == "smash":
 		e.set("secondary_smash", true)
+	# Run 173 — boss move pool. set() is a silent no-op on non-BossBrain hosts,
+	# so this is safe to apply to every enemy. An empty moveset_id falls through
+	# to BossMoves.legacy_pool() (pre-Run-173 chase/bite/smash).
+	e.set("moveset_id", String(cfg.get("moveset", "")))
+	e.set("boss_display_name", String(cfg.get("name", "Boss")))
+	e.set("is_big_boss", bool(cfg.get("is_boss", false)))
+	e.set("spawn_tier", tier)
+	if cfg.has("adds"):
+		e.set("add_configs", cfg.get("adds", []))
 	# Run 122 — melee bite knockback (e.g. Marshmallow Mauler).
 	if bool(cfg.get("on_hit_knockback", false)):
 		e.set("on_hit_knockback", true)
