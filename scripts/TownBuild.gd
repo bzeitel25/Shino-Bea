@@ -451,7 +451,7 @@ static func build_dojo_landmark(host: Node2D, sign_text: String = "THE DOJO") ->
 		spr.texture = tex
 		spr.scale = Vector2(DOJO_SCALE, DOJO_SCALE)
 		spr.position.y = DOJO_SPRITE_Y - door_sort_y
-		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		spr.texture_filter = Settings.HD_SPRITE_FILTER
 		sprite_wrap.add_child(spr)
 	else:
 		var fb_foot_off: float = south_face_y - door_sort_y

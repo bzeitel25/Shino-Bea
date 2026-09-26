@@ -157,7 +157,7 @@ func _build() -> void:
 	_anim.sprite_frames = sf
 	_anim.animation = "idle"
 	_anim.centered = true
-	_anim.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_anim.texture_filter = Settings.HD_SPRITE_FILTER
 	_anim.scale = Vector2(SPRITE_SCALE, SPRITE_SCALE)
 	# Frames are bottom-anchored (ground contact at frame bottom). Nudge up so
 	# the wheel grounds near the enemy origin instead of centering on it.
@@ -295,7 +295,7 @@ func _spawn_ghost() -> void:
 	g.texture = _anim.sprite_frames.get_frame_texture("roll", _anim.frame)
 	g.centered = true
 	g.flip_h = _anim.flip_h
-	g.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	g.texture_filter = Settings.HD_SPRITE_FILTER
 	g.z_index = GHOST_Z
 	g.z_as_relative = false
 	g.modulate = Color(1, 1, 1, GHOST_ALPHA)

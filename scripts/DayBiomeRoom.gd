@@ -363,7 +363,7 @@ func _build_sprite_cottage(fam: String, pos: Vector2, house_path: String) -> voi
 	spr.texture = tex
 	spr.scale = Vector2(sc, sc)
 	spr.position.y = sprite_y
-	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.texture_filter = Settings.HD_SPRITE_FILTER
 	spr.z_index = -2
 	hut.add_child(spr)
 

@@ -200,6 +200,7 @@ func _build_figure_only() -> void:
 func _build_sprite() -> void:
 	_use_art = true
 	_sprite = AnimatedSprite2D.new()
+	_sprite.texture_filter = Settings.HD_SPRITE_FILTER   # Run 175: mipmapped downscale of HD family art
 	_sprite.name = "Sprite"
 	_sprite.centered = false
 	# Feet sit where the stick figure's feet were (y = +18); the per-tier

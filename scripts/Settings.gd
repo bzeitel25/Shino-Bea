@@ -67,6 +67,14 @@ signal ai_helper_tier_changed(tier: int)
 
 const CFG_PATH: String = "user://settings.cfg"
 
+# Run 175 — filter for HD gen-art that is drawn heavily DOWNSCALED (monsters ~0.15-0.25,
+# family NPCs ~0.16, houses/Dojo/torii ~0.1-0.3). NEAREST at those ratios skips source
+# pixels → jagged, shimmering "fuzzy" edges. Mipmapped linear gives a clean downsample.
+# The PNGs' .import files have mipmaps/generate=true for this to work.
+# One switch: set back to CanvasItem.TEXTURE_FILTER_NEAREST to restore the old look.
+# (Pixel-art heroes, tiles and UI are NOT routed through this — they stay crisp.)
+const HD_SPRITE_FILTER = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+
 # --- Values (defaults) ---
 var master_volume: float = 1.0
 var music_volume: float = 1.0

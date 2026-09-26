@@ -80,7 +80,7 @@ static func build(biome_id: String, with_portal: bool = true) -> Node2D:
 	spr.name = "GateSprite"
 	spr.texture = tex
 	spr.scale = Vector2(sc, sc)
-	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.texture_filter = Settings.HD_SPRITE_FILTER
 	# Anchor at bottom-center of the sprite so the gate "sits" on the ground
 	# at the node's position (foot Y sorting friendly).
 	spr.offset.y = -th * 0.5

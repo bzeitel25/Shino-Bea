@@ -131,7 +131,7 @@ func _kernel_boom(tree: SceneTree, pos: Vector2) -> void:
 	if ResourceLoader.exists("res://Assets/Sprites/popcorn_burst.png"):
 		var spr := Sprite2D.new()
 		spr.texture = load("res://Assets/Sprites/popcorn_burst.png")
-		spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		spr.texture_filter = Settings.HD_SPRITE_FILTER
 		spr.scale = Vector2(BOOM_SPR_SCALE, BOOM_SPR_SCALE) * 0.8
 		spr.z_index = 5
 		scene.add_child(spr)

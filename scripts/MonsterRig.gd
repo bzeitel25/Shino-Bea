@@ -650,6 +650,7 @@ const CONFIGS: Dictionary = {
 		"fps": {"idle": 5.0, "walk": 8.0, "attack": 13.0, "hit": 9.0, "death": 6.0},
 		"loop": {"idle": true, "walk": true, "attack": false, "hit": false, "death": false},
 		"attack_open_frames": 2, "ground_ref": "walk",
+		"ground_h": 390,   # Run 175: walk strip re-cut 390→426 (heads no longer clipped); keep old grounding
 		# Sour-Sugar Thump ground slam + pink splash (4f).
 		"extra_strips": {
 			"smash": {"path": "res://Assets/Sprites/gorilla_smash.png", "frames": 4},
@@ -933,7 +934,7 @@ func _build() -> void:
 	_anim.sprite_frames = sf
 	_anim.animation = "idle"
 	_anim.centered = true
-	_anim.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_anim.texture_filter = Settings.HD_SPRITE_FILTER
 	_anim.scale = Vector2(scl, scl)
 	# Frames are bottom-anchored (feet at frame bottom). Nudge up so the monster
 	# grounds near the enemy origin instead of centering the art on it.
@@ -941,6 +942,12 @@ func _build() -> void:
 	if not strips.has(ref_key):
 		ref_key = strips.keys()[0]
 	var ref_h: float = float(load(strips[ref_key]["path"]).get_height())
+	# Run 175 — strips re-cut from their masters with SYMMETRIC transparent
+	# padding (so cut-off wings/heads fit) keep their old registration: every
+	# frame's content box stays centred where it was. "ground_h" pins the
+	# placement to the pre-padding cell height when the ground_ref strip grew.
+	if _cfg.has("ground_h"):
+		ref_h = float(_cfg["ground_h"])
 	_anim.position = Vector2(0, -(ref_h * scl) * 0.5 + 2.0)
 	_base_pos = _anim.position
 	_facing_sign = float(_cfg.get("facing_sign", 1.0))

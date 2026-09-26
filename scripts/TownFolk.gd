@@ -107,7 +107,7 @@ static func make(host: Node2D, member: String, pos: Vector2,
 	var spr := Sprite2D.new()
 	spr.name = "Sprite"
 	spr.texture = tex
-	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.texture_filter = Settings.HD_SPRITE_FILTER
 	spr.centered = false
 	spr.scale = Vector2(s, s)
 	spr.flip_h = face_left
